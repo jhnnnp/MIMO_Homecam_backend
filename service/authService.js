@@ -7,7 +7,7 @@ const emailService = require('./emailService');
 const smsService = require('./smsService');
 
 const SALT_ROUNDS = 10;
-const JWT_SECRET = process.env.JWT_SECRET || 'your_jwt_secret';
+const JWT_SECRET = process.env.JWT_ACCESS_SECRET || 'your_jwt_secret';
 const ACCESS_TOKEN_EXPIRATION = '1h';
 const REFRESH_TOKEN_EXPIRATION = '7d';
 
@@ -93,7 +93,7 @@ async function signup(signupData) {
       microphonePermission: !!agreeMicrophone,
       locationPermission: !!agreeLocation,
       marketingConsent: !!agreeMarketing,
-      created_at: new Date()
+      createdAt: new Date()
     };
     console.log('📦 [SIGNUP SERVICE] 약관 동의 데이터:', JSON.stringify(termsData, null, 2));
 
@@ -139,7 +139,7 @@ async function signup(signupData) {
       nickname: user.nickname,
       birth: user.birth,
       emailVerified: user.emailVerified,
-      createdAt: user.created_at,
+      createdAt: user.createdAt,
       tokens
     };
 
@@ -243,6 +243,10 @@ async function login(email, password) {
   }
   console.log('✅ [LOGIN] 비밀번호 확인 완료');
 
+  // 기존 토큰 정리 (단일 세션 보장)
+  await RefreshToken.destroy({ where: { userId: user.id } });
+  console.log('🧹 [LOGIN] 기존 토큰 정리 완료');
+
   const tokens = generateTokens(user.id);
   await RefreshToken.create({
     token: tokens.refreshToken,
@@ -254,6 +258,7 @@ async function login(email, password) {
   console.log(`  👤 사용자 ID: ${user.id}`);
   console.log(`  📧 이메일: ${user.email}`);
   console.log(`  👤 이름: ${user.name}`);
+  console.log(`  📱 단일 세션 보장: 기존 토큰 정리 후 새 토큰 발급`);
   console.log('==============================');
 
   return tokens;
@@ -497,7 +502,7 @@ async function getAccount(userId) {
   console.log(`  🏷️ 닉네임: ${u.nickname || 'N/A'}`);
   console.log(`  📧 이메일: ${u.email}`);
   console.log(`  🆔 사용자 ID: ${u.id}`);
-  console.log(`  📅 생성일: ${u.created_at}`);
+  console.log(`  📅 생성일: ${u.createdAt}`);
   console.log('==============================');
 
   return {
@@ -505,7 +510,7 @@ async function getAccount(userId) {
     email: u.email,
     name: u.name,
     nickname: u.nickname,
-    createdAt: u.created_at,
+    createdAt: u.createdAt,
     updatedAt: u.updated_at
   };
 }
@@ -1474,10 +1479,11 @@ async function refreshToken(inputRefreshTokenOrHeader) {
     throw new Error('리프레시 토큰이 존재하지 않거나 만료되었습니다.');
   }
 
-  // 다중 세션 허용: 기존 토큰을 유지하고 새 토큰만 발급
+  // 새 토큰 생성
   const newTokens = generateTokens(tokenUserId);
 
-  // 새 리프레시 토큰 저장 (기존 토큰은 유지)
+  // 기존 토큰 삭제 후 새 토큰 저장 (단일 세션 보장)
+  await RefreshToken.destroy({ where: { token: provided, userId: tokenUserId } });
   await RefreshToken.create({
     token: newTokens.refreshToken,
     userId: tokenUserId,
@@ -1485,7 +1491,7 @@ async function refreshToken(inputRefreshTokenOrHeader) {
   });
 
   console.log(`🔄 [REFRESH TOKEN] 토큰 갱신 성공 - 사용자 ID: ${tokenUserId}`);
-  console.log(`  📱 다중 세션 허용: 기존 토큰 유지, 새 토큰 발급`);
+  console.log(`  📱 단일 세션 보장: 기존 토큰 삭제, 새 토큰 발급`);
 
   return newTokens;
 }

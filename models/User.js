@@ -15,7 +15,7 @@ const User = sequelize.define('User', {
     passwordHash: {
         type: DataTypes.STRING(255),
         allowNull: true,
-        field: 'passwordHash',  // ✅ 명시적 매핑
+        field: 'passwordHash',  // ✅ camelCase로 매핑
     },
     name: {
         type: DataTypes.STRING(50),
@@ -46,14 +46,14 @@ const User = sequelize.define('User', {
         allowNull: false,
         defaultValue: false,
         comment: '이메일 인증 여부',
-        field: 'emailVerified',  // ✅ 명시적 매핑
+        field: 'emailVerified',  // ✅ camelCase로 매핑
     },
     googleId: {
         type: DataTypes.STRING(100),
         allowNull: true,
         unique: true,
         comment: 'Google 사용자 ID',
-        field: 'googleId',  // ✅ 명시적 매핑
+        field: 'googleId',  // ✅ camelCase로 매핑
     },
     provider: {
         type: DataTypes.STRING(20),
@@ -64,12 +64,12 @@ const User = sequelize.define('User', {
     createdAt: {
         type: DataTypes.DATE,
         defaultValue: DataTypes.NOW,
-        field: 'createdAt',  // ✅ 명시적 매핑
+        field: 'createdAt',  // ✅ camelCase로 매핑
     },
     updatedAt: {
         type: DataTypes.DATE,
         defaultValue: DataTypes.NOW,
-        field: 'updatedAt',  // ✅ 명시적 매핑
+        field: 'updatedAt',  // ✅ camelCase로 매핑
     },
 
 }, {

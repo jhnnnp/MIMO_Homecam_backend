@@ -13,7 +13,7 @@ module.exports = {
   async getProfile(userId) {
     try {
       const user = await User.findByPk(userId, {
-        attributes: ['id', 'email', 'name', 'nickname', 'bio', 'birth', 'emailVerified', 'provider', 'picture', 'created_at']
+        attributes: ['id', 'email', 'name', 'nickname', 'bio', 'birth', 'emailVerified', 'provider', 'picture', 'createdAt']
       });
       if (!user) {
         throw new Error('사용자 정보를 찾을 수 없습니다.');

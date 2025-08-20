@@ -17,15 +17,18 @@ const RefreshToken = sequelize.define('RefreshToken', {
         references: {
             model: 'User',
             key: 'id'
-        }
+        },
+        field: 'userId',  // ✅ camelCase로 매핑
     },
     expiresAt: {
         type: DataTypes.DATE,
         allowNull: false,
+        field: 'expiresAt',  // ✅ camelCase로 매핑
     },
     createdAt: {
         type: DataTypes.DATE,
         defaultValue: DataTypes.NOW,
+        field: 'createdAt',  // ✅ camelCase로 매핑
     },
 }, {
     tableName: 'RefreshToken',
