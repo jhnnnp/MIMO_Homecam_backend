@@ -1,0 +1,58 @@
+{
+  "name": "mimo-backend",
+  "version": "1.0.0",
+  "description": "MIMO - 공기계를 활용한 홈캠 백엔드 시스템",
+  "main": "app.js",
+  "scripts": {
+    "dev": "node --watch app.js",
+    "start": "NODE_ENV=production node app.js",
+    "websocket": "node websocket-server.js",
+    "dev:websocket": "node --watch websocket-server.js",
+    "test": "jest --runInBand",
+    "lint": "eslint src/",
+    "lint:fix": "eslint src/ --fix"
+  },
+  "keywords": [
+    "homecam",
+    "security",
+    "camera",
+    "streaming"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "aws-sdk": "2.1606.0",
+    "bcryptjs": "^2.4.3",
+    "cors": "2.8.5",
+    "dotenv": "16.4.5",
+    "express": "4.19.2",
+    "express-rate-limit": "7.4.0",
+    "helmet": "7.1.0",
+    "joi": "^18.0.0",
+    "jsonwebtoken": "9.0.2",
+    "morgan": "1.10.0",
+    "mysql2": "3.10.0",
+    "node-fetch": "^3.3.2",
+    "nodemailer": "7.0.5",
+    "passport": "0.7.0",
+    "passport-google-oauth20": "2.0.0",
+    "pino": "9.2.0",
+    "sequelize": "6.37.3",
+    "uuid": "^9.0.1",
+    "ws": "^8.18.3",
+    "zod": "3.23.8"
+  },
+  "devDependencies": {
+    "axios": "^1.5.0",
+    "eslint": "8.57.0",
+    "eslint-config-standard": "17.1.0",
+    "eslint-plugin-import": "2.29.1",
+    "eslint-plugin-n": "16.6.2",
+    "eslint-plugin-promise": "6.4.0",
+    "jest": "29.7.0",
+    "supertest": "7.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

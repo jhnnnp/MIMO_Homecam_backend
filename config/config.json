@@ -1,0 +1,23 @@
+{
+  "development": {
+    "username": "root",
+    "password": "5010",
+    "database": "mimo_homecam_db",
+    "host": "localhost",
+    "dialect": "mysql"
+  },
+  "test": {
+    "username": "root",
+    "password": "5010",
+    "database": "mimo_homecam_db",
+    "host": "localhost",
+    "dialect": "mysql"
+  },
+  "production": {
+    "username": "root",
+    "password": "5010",
+    "database": "mimo_homecam_db",
+    "host": "localhost",
+    "dialect": "mysql"
+  }
+}
