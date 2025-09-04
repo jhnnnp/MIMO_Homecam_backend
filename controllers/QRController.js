@@ -1,5 +1,6 @@
 const qrCodeService = require("../service/qrCodeService");
 const { Camera } = require("../models");
+const { Op } = require('sequelize');
 
 /**
  * QR 코드 생성
@@ -11,13 +12,12 @@ exports.generateQRCode = async (req, res) => {
         const { cameraId } = req.params;
         const userId = req.user.userId;
 
-        // 카메라 정보 조회
-        const camera = await Camera.findOne({
-            where: {
-                id: cameraId,
-                user_id: userId
-            }
-        });
+        // 카메라 정보 조회 (숫자 ID 또는 device_id 모두 허용)
+        const isNumericId = /^\d+$/.test(String(cameraId));
+        const where = isNumericId
+            ? { id: Number(cameraId), user_id: userId }
+            : { device_id: String(cameraId), user_id: userId };
+        const camera = await Camera.findOne({ where });
 
         if (!camera) {
             return res.status(404).json({
@@ -31,7 +31,7 @@ exports.generateQRCode = async (req, res) => {
 
         // QR 코드 생성
         const qrData = await qrCodeService.generateQRCode({
-            cameraId: camera.id,
+            cameraId: camera.device_id ? String(camera.device_id) : String(camera.id),
             name: camera.name
         });
 

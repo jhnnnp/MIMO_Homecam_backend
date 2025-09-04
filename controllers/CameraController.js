@@ -158,13 +158,24 @@ exports.registerCamera = asyncHandler(async (req, res) => {
         createdAt: new Date()
     };
 
-    // Redis 기반 연결 관리자 사용 (connectionId가 있으면 사용, 없으면 생성)
-    const finalConnectionId = connectionId || await connectionManager.registerCamera(cameraData);
-
-    if (connectionId) {
-        // connectionId가 제공된 경우 직접 등록
-        await connectionManager.registerCameraWithId(cameraData, connectionId);
+    // DB에 카메라 영속화 (device_id 기준 upsert)
+    let dbCamera = null;
+    try {
+        dbCamera = await cameraService.createOrUpdateCameraByDeviceId(String(cameraId), cameraName, userId, 'online');
+    } catch (e) {
+        // DB 저장 실패는 흐름을 막지 않되 로그만 남김
+        log('warn', { message: '카메라 DB 저장 실패', error: e.message });
     }
+
+    // Redis 기반 연결 관리자 사용 (PIN 코드 = connectionId)
+    let finalConnectionId = connectionId;
+    if (!finalConnectionId) {
+        // 6자리 PIN 코드 생성 + 고유성 보장
+        const generateSixDigitPin = () => String(Math.floor(100000 + Math.random() * 900000));
+        finalConnectionId = await connectionManager.generateUniqueConnectionId(generateSixDigitPin);
+    }
+    // 지정된/생성된 PIN 코드로 등록
+    await connectionManager.registerCameraWithId(cameraData, finalConnectionId);
 
     // 퍼블리셔용 미디어 서버 URL 제공
     const publisherUrl = buildCameraStreamUrl(String(cameraId));
@@ -174,8 +185,10 @@ exports.registerCamera = asyncHandler(async (req, res) => {
 
     ok(res, {
         connectionId: finalConnectionId,
+        pinCode: finalConnectionId,
         cameraId,
         cameraName,
+        dbCameraId: dbCamera ? dbCamera.id : undefined,
         media: {
             publisherUrl
         },

@@ -12,22 +12,32 @@ const Camera = sequelize.define('Camera', {
         allowNull: false,
     },
     name: {
-        type: DataTypes.STRING(50),
+        type: DataTypes.STRING(100),
+        allowNull: false,
+    },
+    device_id: {
+        type: DataTypes.STRING(255),
+        unique: true,
+        allowNull: true,
     },
     location: {
         type: DataTypes.STRING(100),
     },
     status: {
-        type: DataTypes.ENUM('online', 'offline'),
+        type: DataTypes.ENUM('online', 'offline', 'error'),
         defaultValue: 'offline',
     },
-    last_seen: {
-        type: DataTypes.DATE,
-    },
+    last_seen: { type: DataTypes.DATE },
+    last_heartbeat: { type: DataTypes.DATE },
     firmware: {
         type: DataTypes.STRING(50),
     },
+    settings: { type: DataTypes.JSON },
     created_at: {
+        type: DataTypes.DATE,
+        defaultValue: DataTypes.NOW,
+    },
+    updated_at: {
         type: DataTypes.DATE,
         defaultValue: DataTypes.NOW,
     },

@@ -41,6 +41,15 @@ const getLocalIPAddress = () => {
     return 'localhost'; // 기본값
 };
 
+// 서버 시작 시 네트워크 IP 기반 URL 환경변수 보정
+const detectedIPForEnv = getLocalIPAddress();
+if (!process.env.MEDIA_SERVER_HOST || process.env.MEDIA_SERVER_HOST === 'localhost') {
+    process.env.MEDIA_SERVER_HOST = detectedIPForEnv;
+}
+if (!process.env.WS_SERVER_URL || /localhost/i.test(process.env.WS_SERVER_URL)) {
+    process.env.WS_SERVER_URL = `ws://${detectedIPForEnv}:${process.env.PORT || 4001}`;
+}
+
 // Sequelize 모델 로드
 require('./models');
 

@@ -88,6 +88,35 @@ async function createCamera(cameraData, userId) {
 }
 
 /**
+ * 설명: device_id 기준으로 카메라 생성 또는 업데이트
+ * 입력: deviceId, name, userId, status
+ * 출력: 생성/업데이트된 카메라 정보
+ */
+async function createOrUpdateCameraByDeviceId(deviceId, name, userId, status = 'offline') {
+    try {
+        let camera = await Camera.findOne({ where: { device_id: deviceId, user_id: userId } });
+
+        if (camera) {
+            await camera.update({ name, status, updated_at: new Date() });
+            return camera;
+        }
+
+        camera = await Camera.create({
+            device_id: deviceId,
+            name,
+            user_id: userId,
+            status,
+            created_at: new Date(),
+            updated_at: new Date()
+        });
+        return camera;
+    } catch (error) {
+        console.error('카메라 upsert 실패:', error);
+        throw new Error('카메라 저장에 실패했습니다.');
+    }
+}
+
+/**
  * 설명: 카메라 정보 업데이트
  * 입력: cameraId, updateData, userId
  * 출력: 업데이트된 카메라 정보
@@ -270,5 +299,6 @@ module.exports = {
     deleteCamera,
     updateCameraStatus,
     getCameraStats,
-    cleanupOfflineCameras
+    cleanupOfflineCameras,
+    createOrUpdateCameraByDeviceId
 };
