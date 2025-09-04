@@ -6,11 +6,15 @@
 const WebSocket = require('ws');
 const jwt = require('jsonwebtoken');
 const { User } = require('./models');
+const connectionManager = require('./utils/connectionManager');
+const { buildLiveStreamUrl, buildCameraStreamUrl } = require('./utils/mediaUrlBuilder');
 
 class WebSocketServer {
     constructor(server) {
         this.wss = new WebSocket.Server({ server });
         this.clients = new Map(); // userId -> WebSocket
+        this.subscriptions = new Map(); // cameraId -> Set<userId>
+        this.userSubscriptions = new Map(); // userId -> Set<cameraId>
         this.setupWebSocket();
     }
 
@@ -24,6 +28,22 @@ class WebSocketServer {
                 const token = this.extractToken(req);
                 if (!token) {
                     ws.close(1008, 'Authentication required');
+                    return;
+                }
+
+                // 개발용 토큰 허용
+                if (token === 'dev_token_123' && process.env.NODE_ENV !== 'production') {
+                    console.log('🔧 개발용 토큰으로 WebSocket 연결 허용');
+                    const mockUser = { id: 'dev_user', email: 'dev@mimo.com' };
+                    this.clients.set(mockUser.id, ws);
+                    console.log(`WebSocket client connected: ${mockUser.email} (${mockUser.id})`);
+
+                    this.sendToUser(mockUser.id, {
+                        type: 'connected',
+                        data: { message: 'WebSocket connected successfully (dev mode)' }
+                    });
+
+                    this.setupClientEventHandlers(ws, mockUser);
                     return;
                 }
 
@@ -67,10 +87,10 @@ class WebSocketServer {
      * 클라이언트 이벤트 핸들러 설정
      */
     setupClientEventHandlers(ws, user) {
-        ws.on('message', (data) => {
+        ws.on('message', async (data) => {
             try {
                 const message = JSON.parse(data);
-                this.handleClientMessage(user, message);
+                await this.handleClientMessage(user, message);
             } catch (error) {
                 console.error('Failed to parse client message:', error);
                 this.sendToUser(user.id, {
@@ -83,22 +103,25 @@ class WebSocketServer {
         ws.on('close', (code, reason) => {
             console.log(`WebSocket client disconnected: ${user.email} (${user.id}) - ${code}: ${reason}`);
             this.clients.delete(user.id);
+            this.cleanupUserSubscriptions(user.id);
         });
 
         ws.on('error', (error) => {
             console.error(`WebSocket error for user ${user.id}:`, error);
             this.clients.delete(user.id);
+            this.cleanupUserSubscriptions(user.id);
         });
     }
 
     /**
      * 클라이언트 메시지 처리
      */
-    handleClientMessage(user, message) {
+    async handleClientMessage(user, message) {
         const { type, data } = message;
 
         switch (type) {
             case 'ping':
+            case 'heartbeat':
                 this.sendToUser(user.id, { type: 'pong', data: { timestamp: new Date().toISOString() } });
                 break;
 
@@ -109,12 +132,12 @@ class WebSocketServer {
 
             case 'qr_connect':
                 // QR 코드 연결 로직
-                this.handleQRConnection(user.id, data);
+                await this.handleQRConnection(user.id, data);
                 break;
 
             case 'qr_disconnect':
                 // QR 코드 연결 해제 로직
-                this.handleQRDisconnection(user.id, data);
+                await this.handleQRDisconnection(user.id, data);
                 break;
 
             case 'unsubscribe_camera':
@@ -132,16 +155,134 @@ class WebSocketServer {
     }
 
     /**
-     * 카메라 구독 처리
+     * QR 코드 기반 뷰어 연결 처리
+     * @param {string} userId - 뷰어 사용자 ID
+     * @param {{ connectionId: string, deviceId?: string }} data
+     */
+    async handleQRConnection(userId, data) {
+        try {
+            const { connectionId, deviceId } = data || {};
+            if (!connectionId) {
+                this.sendToUser(userId, { type: 'error', data: { code: 'E_MISSING_CONNECTION_ID', message: 'connectionId is required' } });
+                return;
+            }
+
+            // Redis에서 카메라 정보 조회
+            const cameraData = await connectionManager.getCamera(connectionId);
+            if (!cameraData) {
+                this.sendToUser(userId, { type: 'error', data: { code: 'E_CAMERA_NOT_FOUND', message: 'Camera not found or connection expired' } });
+                return;
+            }
+
+            // 뷰어 연결 등록
+            const viewerConnection = {
+                cameraId: cameraData.id || cameraData.cameraId,
+                cameraName: cameraData.name || cameraData.cameraName,
+                connectionId,
+                viewerId: userId,
+                deviceId: deviceId || null,
+                status: 'connected'
+            };
+
+            await connectionManager.registerViewerConnection(connectionId, userId, viewerConnection);
+
+            // 미디어 서버 URL 생성
+            const cameraId = viewerConnection.cameraId;
+            const viewerUrl = buildLiveStreamUrl(String(cameraId), String(userId));
+            const cameraUrl = buildCameraStreamUrl(String(cameraId));
+
+            // 뷰어에게 연결 정보 전달
+            this.sendToUser(userId, {
+                type: 'qr_connected',
+                data: {
+                    connectionId,
+                    cameraId,
+                    cameraName: viewerConnection.cameraName,
+                    viewerId: userId,
+                    media: {
+                        viewerUrl,
+                        cameraUrl
+                    }
+                }
+            });
+
+            // 카메라 소유자에게 뷰어 연결 알림 (카메라 사용자 연결 시)
+            if (cameraData.userId) {
+                this.sendToUser(cameraData.userId, {
+                    type: 'viewer_connected',
+                    data: {
+                        cameraId,
+                        connectionId,
+                        viewerId: userId
+                    }
+                });
+            }
+        } catch (error) {
+            console.error('handleQRConnection error:', error);
+            this.sendToUser(userId, { type: 'error', data: { code: 'E_QR_CONNECT_FAILED', message: 'Failed to connect using QR code' } });
+        }
+    }
+
+    /**
+     * QR 코드 기반 뷰어 연결 해제
+     * @param {string} userId - 뷰어 사용자 ID
+     * @param {{ connectionId: string }} data
+     */
+    async handleQRDisconnection(userId, data) {
+        try {
+            const { connectionId } = data || {};
+            if (!connectionId) {
+                this.sendToUser(userId, { type: 'error', data: { code: 'E_MISSING_CONNECTION_ID', message: 'connectionId is required' } });
+                return;
+            }
+
+            const existing = await connectionManager.getViewerConnection(connectionId, userId);
+            if (!existing) {
+                this.sendToUser(userId, { type: 'qr_disconnected', data: { connectionId, message: 'Already disconnected' } });
+                return;
+            }
+
+            await connectionManager.unregisterViewerConnection(connectionId, userId);
+
+            this.sendToUser(userId, { type: 'qr_disconnected', data: { connectionId } });
+
+            // 카메라 소유자에게 해제 알림
+            const cameraData = await connectionManager.getCamera(connectionId);
+            if (cameraData && cameraData.userId) {
+                this.sendToUser(cameraData.userId, {
+                    type: 'viewer_disconnected',
+                    data: { connectionId, cameraId: existing.cameraId, viewerId: userId }
+                });
+            }
+        } catch (error) {
+            console.error('handleQRDisconnection error:', error);
+            this.sendToUser(userId, { type: 'error', data: { code: 'E_QR_DISCONNECT_FAILED', message: 'Failed to disconnect' } });
+        }
+    }
+
+    /**
+     * 카메라 구독 처리 (상태/이벤트 알림용)
      */
     handleCameraSubscription(userId, data) {
-        const { cameraId } = data;
-        // TODO: 카메라 구독 로직 구현
-        console.log(`User ${userId} subscribed to camera ${cameraId}`);
+        const { cameraId } = data || {};
+        if (!cameraId) {
+            this.sendToUser(userId, { type: 'error', data: { code: 'E_MISSING_CAMERA_ID', message: 'cameraId is required' } });
+            return;
+        }
+
+        // camera -> users
+        const users = this.subscriptions.get(cameraId) || new Set();
+        users.add(userId);
+        this.subscriptions.set(cameraId, users);
+
+        // user -> cameras
+        const cameras = this.userSubscriptions.get(userId) || new Set();
+        cameras.add(cameraId);
+        this.userSubscriptions.set(userId, cameras);
 
         this.sendToUser(userId, {
             type: 'camera_subscribed',
-            data: { cameraId, message: 'Successfully subscribed to camera' }
+            data: { cameraId }
         });
     }
 
@@ -149,14 +290,46 @@ class WebSocketServer {
      * 카메라 구독 해제 처리
      */
     handleCameraUnsubscription(userId, data) {
-        const { cameraId } = data;
-        // TODO: 카메라 구독 해제 로직 구현
-        console.log(`User ${userId} unsubscribed from camera ${cameraId}`);
+        const { cameraId } = data || {};
+        if (!cameraId) {
+            this.sendToUser(userId, { type: 'error', data: { code: 'E_MISSING_CAMERA_ID', message: 'cameraId is required' } });
+            return;
+        }
+
+        // camera -> users
+        const users = this.subscriptions.get(cameraId);
+        if (users) {
+            users.delete(userId);
+            if (users.size === 0) this.subscriptions.delete(cameraId);
+        }
+
+        // user -> cameras
+        const cameras = this.userSubscriptions.get(userId);
+        if (cameras) {
+            cameras.delete(cameraId);
+            if (cameras.size === 0) this.userSubscriptions.delete(userId);
+        }
 
         this.sendToUser(userId, {
             type: 'camera_unsubscribed',
-            data: { cameraId, message: 'Successfully unsubscribed from camera' }
+            data: { cameraId }
         });
+    }
+
+    /**
+     * 사용자 종료 시 구독 정리
+     */
+    cleanupUserSubscriptions(userId) {
+        const cameras = this.userSubscriptions.get(userId);
+        if (!cameras) return;
+        cameras.forEach((cameraId) => {
+            const users = this.subscriptions.get(cameraId);
+            if (users) {
+                users.delete(userId);
+                if (users.size === 0) this.subscriptions.delete(cameraId);
+            }
+        });
+        this.userSubscriptions.delete(userId);
     }
 
     /**
@@ -214,7 +387,12 @@ class WebSocketServer {
         if (userIds) {
             userIds.forEach(userId => this.sendToUser(userId, message));
         } else {
-            this.broadcast(message);
+            const subscribers = this.subscriptions.get(cameraId);
+            if (subscribers && subscribers.size > 0) {
+                subscribers.forEach(userId => this.sendToUser(userId, message));
+            } else {
+                this.broadcast(message);
+            }
         }
     }
 
