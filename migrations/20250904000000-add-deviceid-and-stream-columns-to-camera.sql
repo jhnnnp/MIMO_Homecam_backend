@@ -1,0 +1,6 @@
+-- Add device_id, last_heartbeat, settings, updated_at to Camera if missing
+ALTER TABLE Camera
+  ADD COLUMN IF NOT EXISTS device_id VARCHAR(255) NULL UNIQUE,
+  ADD COLUMN IF NOT EXISTS last_heartbeat TIMESTAMP NULL,
+  ADD COLUMN IF NOT EXISTS settings JSON NULL,
+  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP;
