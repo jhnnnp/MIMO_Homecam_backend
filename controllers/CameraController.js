@@ -1,319 +1,479 @@
 // CameraController.js
 const cameraService = require('../service/CameraService');
 
-/**
- * 설명: 사용자의 모든 카메라 목록 조회
- * 입력: req.user.userId
- * 출력: 카메라 목록 JSON
- * 부작용: 없음
- * 예외: 500 에러
- */
-exports.getCameras = async (req, res) => {
-    try {
-        const cameras = await cameraService.getCamerasByUserId(req.user.userId);
-
-        res.json({
-            ok: true,
-            data: { cameras }
-        });
-    } catch (error) {
-        console.error('카메라 목록 조회 에러:', error.message);
-        res.status(500).json({
-            ok: false,
-            error: {
-                code: 'E_DATABASE_ERROR',
-                message: '카메라 목록을 조회할 수 없습니다.'
-            }
-        });
-    }
-};
+// 유틸리티 import
+const { ok, err, errors } = require('../utils/responseHelpers');
+const { parsePaging } = require('../utils/validationHelpers');
+const asyncHandler = require('../utils/asyncHandler');
+const { createRequestLog, createResponseLog, log } = require('../utils/logger');
+const connectionManager = require('../utils/connectionManager');
+const { buildLiveStreamUrl, buildCameraStreamUrl, getDefaultMediaSettings } = require('../utils/mediaUrlBuilder');
 
 /**
- * 설명: 특정 카메라 상세 정보 조회
- * 입력: req.params.id, req.user.userId
- * 출력: 카메라 정보 JSON
- * 부작용: 없음
- * 예외: 404, 500 에러
+ * [GET] /cameras
+ * 사용자의 모든 카메라 목록 조회
  */
-exports.getCameraById = async (req, res) => {
-    try {
-        const { id } = req.params;
-        const camera = await cameraService.getCameraById(id, req.user.userId);
+exports.getCameras = asyncHandler(async (req, res) => {
+    const requestLog = createRequestLog(req, 'GET_CAMERAS');
+    log('info', requestLog);
 
-        res.json({
-            ok: true,
-            data: { camera }
-        });
-    } catch (error) {
-        console.error('카메라 조회 에러:', error.message);
+    const cameras = await cameraService.getCamerasByUserId(req.user.userId);
 
-        if (error.message === '카메라를 찾을 수 없습니다.') {
-            res.status(404).json({
-                ok: false,
-                error: {
-                    code: 'E_NOT_FOUND',
-                    message: '카메라를 찾을 수 없습니다.'
-                }
-            });
-        } else {
-            res.status(500).json({
-                ok: false,
-                error: {
-                    code: 'E_DATABASE_ERROR',
-                    message: '카메라 정보를 조회할 수 없습니다.'
-                }
-            });
-        }
-    }
-};
+    const responseLog = createResponseLog(res, 200, '카메라 목록 조회 성공');
+    log('info', responseLog);
+
+    ok(res, { cameras });
+});
 
 /**
- * 설명: 새 카메라 등록
- * 입력: req.body, req.user.userId
- * 출력: 생성된 카메라 정보 JSON
- * 부작용: DB 저장
- * 예외: 400, 500 에러
+ * [GET] /cameras/:id
+ * 특정 카메라 상세 정보 조회
  */
-exports.createCamera = async (req, res) => {
-    try {
-        const cameraData = req.body;
-        const camera = await cameraService.createCamera(cameraData, req.user.userId);
+exports.getCameraById = asyncHandler(async (req, res) => {
+    const requestLog = createRequestLog(req, 'GET_CAMERA_BY_ID');
+    log('info', requestLog);
 
-        res.status(201).json({
-            ok: true,
-            data: { camera },
-            message: '카메라가 성공적으로 등록되었습니다.'
-        });
-    } catch (error) {
-        console.error('카메라 생성 에러:', error.message);
-        res.status(500).json({
-            ok: false,
-            error: {
-                code: 'E_DATABASE_ERROR',
-                message: '카메라를 등록할 수 없습니다.'
-            }
-        });
-    }
-};
+    const { id } = req.params;
+    const camera = await cameraService.getCameraById(id, req.user.userId);
+
+    const responseLog = createResponseLog(res, 200, '카메라 정보 조회 성공');
+    log('info', responseLog);
+
+    ok(res, { camera });
+});
 
 /**
- * 설명: 카메라 정보 업데이트
- * 입력: req.params.id, req.body, req.user.userId
- * 출력: 업데이트된 카메라 정보 JSON
- * 부작용: DB 업데이트
- * 예외: 404, 500 에러
+ * [POST] /cameras
+ * 새 카메라 등록
  */
-exports.updateCamera = async (req, res) => {
-    try {
-        const { id } = req.params;
-        const updateData = req.body;
-        const camera = await cameraService.updateCamera(id, updateData, req.user.userId);
+exports.createCamera = asyncHandler(async (req, res) => {
+    const requestLog = createRequestLog(req, 'CREATE_CAMERA');
+    log('info', requestLog);
 
-        res.json({
-            ok: true,
-            data: { camera },
-            message: '카메라 정보가 성공적으로 업데이트되었습니다.'
-        });
-    } catch (error) {
-        console.error('카메라 업데이트 에러:', error.message);
+    const cameraData = req.body;
+    const camera = await cameraService.createCamera(cameraData, req.user.userId);
 
-        if (error.message === '카메라를 찾을 수 없습니다.') {
-            res.status(404).json({
-                ok: false,
-                error: {
-                    code: 'E_NOT_FOUND',
-                    message: '카메라를 찾을 수 없습니다.'
-                }
-            });
-        } else {
-            res.status(500).json({
-                ok: false,
-                error: {
-                    code: 'E_DATABASE_ERROR',
-                    message: '카메라 정보를 업데이트할 수 없습니다.'
-                }
-            });
-        }
-    }
-};
+    const responseLog = createResponseLog(res, 201, '카메라 등록 성공');
+    log('info', responseLog);
+
+    ok(res, {
+        camera,
+        message: '카메라가 성공적으로 등록되었습니다.'
+    }, null, 201);
+});
 
 /**
- * 설명: 카메라 삭제
- * 입력: req.params.id, req.user.userId
- * 출력: 삭제 성공 메시지
- * 부작용: DB 삭제
- * 예외: 404, 500 에러
+ * [PUT] /cameras/:id
+ * 카메라 정보 업데이트
  */
-exports.deleteCamera = async (req, res) => {
-    try {
-        const { id } = req.params;
-        await cameraService.deleteCamera(id, req.user.userId);
+exports.updateCamera = asyncHandler(async (req, res) => {
+    const requestLog = createRequestLog(req, 'UPDATE_CAMERA');
+    log('info', requestLog);
 
-        res.json({
-            ok: true,
-            message: '카메라가 성공적으로 삭제되었습니다.'
-        });
-    } catch (error) {
-        console.error('카메라 삭제 에러:', error.message);
+    const { id } = req.params;
+    const updateData = req.body;
+    const camera = await cameraService.updateCamera(id, updateData, req.user.userId);
 
-        if (error.message === '카메라를 찾을 수 없습니다.') {
-            res.status(404).json({
-                ok: false,
-                error: {
-                    code: 'E_NOT_FOUND',
-                    message: '카메라를 찾을 수 없습니다.'
-                }
-            });
-        } else {
-            res.status(500).json({
-                ok: false,
-                error: {
-                    code: 'E_DATABASE_ERROR',
-                    message: '카메라를 삭제할 수 없습니다.'
-                }
-            });
-        }
-    }
-};
+    const responseLog = createResponseLog(res, 200, '카메라 정보 업데이트 성공');
+    log('info', responseLog);
+
+    ok(res, {
+        camera,
+        message: '카메라 정보가 성공적으로 업데이트되었습니다.'
+    });
+});
 
 /**
- * 설명: 카메라 하트비트 업데이트
- * 입력: req.params.id, req.body.status
- * 출력: 업데이트된 카메라 정보 JSON
- * 부작용: DB 업데이트
- * 예외: 404, 500 에러
+ * [DELETE] /cameras/:id
+ * 카메라 삭제
  */
-exports.updateCameraHeartbeat = async (req, res) => {
-    try {
-        const { id } = req.params;
-        const { status = 'online' } = req.body;
+exports.deleteCamera = asyncHandler(async (req, res) => {
+    const requestLog = createRequestLog(req, 'DELETE_CAMERA');
+    log('info', requestLog);
 
-        const camera = await cameraService.updateCameraStatus(id, status);
+    const { id } = req.params;
+    await cameraService.deleteCamera(id, req.user.userId);
 
-        res.json({
-            ok: true,
-            data: { camera },
-            message: '카메라 상태가 업데이트되었습니다.'
-        });
-    } catch (error) {
-        console.error('카메라 하트비트 에러:', error.message);
+    const responseLog = createResponseLog(res, 200, '카메라 삭제 성공');
+    log('info', responseLog);
 
-        if (error.message === '카메라를 찾을 수 없습니다.') {
-            res.status(404).json({
-                ok: false,
-                error: {
-                    code: 'E_NOT_FOUND',
-                    message: '카메라를 찾을 수 없습니다.'
-                }
-            });
-        } else {
-            res.status(500).json({
-                ok: false,
-                error: {
-                    code: 'E_DATABASE_ERROR',
-                    message: '카메라 상태를 업데이트할 수 없습니다.'
-                }
-            });
-        }
-    }
-};
+    ok(res, {
+        message: '카메라가 성공적으로 삭제되었습니다.'
+    });
+});
 
 /**
- * 설명: 카메라 통계 정보 조회
- * 입력: req.params.id, req.user.userId
- * 출력: 카메라 통계 정보 JSON
- * 부작용: 없음
- * 예외: 404, 500 에러
+ * [GET] /cameras/:id/live-stream
+ * 카메라 라이브 스트림 정보 조회
  */
-exports.getCameraStats = async (req, res) => {
-    try {
-        const { id } = req.params;
-        const stats = await cameraService.getCameraStats(id, req.user.userId);
+exports.getLiveStream = asyncHandler(async (req, res) => {
+    const requestLog = createRequestLog(req, 'GET_LIVE_STREAM');
+    log('info', requestLog);
 
-        res.json({
-            ok: true,
-            data: { stats }
-        });
-    } catch (error) {
-        console.error('카메라 통계 조회 에러:', error.message);
+    const { id } = req.params;
+    const viewerId = req.user.userId;
 
-        if (error.message === '카메라를 찾을 수 없습니다.') {
-            res.status(404).json({
-                ok: false,
-                error: {
-                    code: 'E_NOT_FOUND',
-                    message: '카메라를 찾을 수 없습니다.'
-                }
-            });
-        } else {
-            res.status(500).json({
-                ok: false,
-                error: {
-                    code: 'E_DATABASE_ERROR',
-                    message: '카메라 통계를 조회할 수 없습니다.'
-                }
-            });
-        }
-    }
-};
+    // 카메라 접근 권한 확인
+    const camera = await cameraService.getCameraById(id, req.user.userId);
+
+    // 미디어 서버 URL 생성
+    const streamUrl = buildLiveStreamUrl(id, viewerId);
+    const defaultSettings = getDefaultMediaSettings();
+
+    const responseLog = createResponseLog(res, 200, '라이브 스트림 정보 조회 성공');
+    log('info', responseLog);
+
+    ok(res, {
+        cameraId: id,
+        cameraName: camera.name,
+        streamUrl,
+        settings: defaultSettings,
+        viewerId
+    });
+});
 
 /**
- * 설명: 라이브 스트림 정보 조회 (WebRTC 시그널링용)
- * 입력: req.params.id, req.user.userId
- * 출력: 스트림 정보 JSON
- * 부작용: 없음
- * 예외: 404, 500 에러
+ * [POST] /cameras/register
+ * 홈캠 등록 (실시간 스트리밍용)
  */
-exports.getLiveStream = async (req, res) => {
-    try {
-        const { id } = req.params;
-        const camera = await cameraService.getCameraById(id, req.user.userId);
+exports.registerCamera = asyncHandler(async (req, res) => {
+    const requestLog = createRequestLog(req, 'REGISTER_CAMERA');
+    log('info', requestLog);
 
-        // 미디어 서버에서 스트림 정보 조회
-        const mediaServer = global.mediaServer;
-        const streamInfo = mediaServer ? mediaServer.getStreamInfo(camera.id) : null;
+    const { cameraId, cameraName, connectionId } = req.body;
+    const userId = req.user.userId;
 
-        // WebRTC 시그널링 정보 생성
-        const stream = {
-            cameraId: camera.id,
-            cameraName: camera.name,
-            status: camera.status,
-            webrtcUrl: `ws://${process.env.MEDIA_SERVER_HOST || 'localhost'}:${process.env.MEDIA_SERVER_PORT || 4002}?cameraId=${camera.id}&type=viewer`,
-            publisherUrl: `ws://${process.env.MEDIA_SERVER_HOST || 'localhost'}:${process.env.MEDIA_SERVER_PORT || 4002}?cameraId=${camera.id}&type=publisher`,
-            protocol: 'webrtc',
-            quality: 'high',
-            isActive: camera.status === 'online',
-            viewers: streamInfo ? streamInfo.viewers : 0,
-            bitrate: 2048,
-            frameRate: 30,
-            resolution: '1080p',
-            lastHeartbeat: camera.last_heartbeat,
-            streamStatus: streamInfo ? streamInfo.status : 'offline'
-        };
-
-        res.json({
-            ok: true,
-            data: { stream }
-        });
-    } catch (error) {
-        console.error('라이브 스트림 조회 에러:', error.message);
-
-        if (error.message === '카메라를 찾을 수 없습니다.') {
-            res.status(404).json({
-                ok: false,
-                error: {
-                    code: 'E_NOT_FOUND',
-                    message: '카메라를 찾을 수 없습니다.'
-                }
-            });
-        } else {
-            res.status(500).json({
-                ok: false,
-                error: {
-                    code: 'E_DATABASE_ERROR',
-                    message: '라이브 스트림 정보를 조회할 수 없습니다.'
-                }
-            });
-        }
+    if (!cameraId || !cameraName) {
+        const responseLog = createResponseLog(res, 400, '카메라 ID와 이름이 필요합니다.');
+        log('warn', responseLog);
+        return errors.validation(res, '카메라 ID와 이름이 필요합니다.');
     }
-};
+
+    // 카메라 데이터 준비
+    const cameraData = {
+        id: cameraId,
+        name: cameraName,
+        userId: userId,
+        status: 'ready',
+        createdAt: new Date()
+    };
+
+    // Redis 기반 연결 관리자 사용 (connectionId가 있으면 사용, 없으면 생성)
+    const finalConnectionId = connectionId || await connectionManager.registerCamera(cameraData);
+
+    if (connectionId) {
+        // connectionId가 제공된 경우 직접 등록
+        await connectionManager.registerCameraWithId(cameraData, connectionId);
+    }
+
+    // 퍼블리셔용 미디어 서버 URL 제공
+    const publisherUrl = buildCameraStreamUrl(String(cameraId));
+
+    const responseLog = createResponseLog(res, 201, '홈캠 등록 성공');
+    log('info', responseLog);
+
+    ok(res, {
+        connectionId: finalConnectionId,
+        cameraId,
+        cameraName,
+        media: {
+            publisherUrl
+        },
+        message: '홈캠이 성공적으로 등록되었습니다.'
+    }, null, 201);
+});
+
+/**
+ * [GET] /cameras/search/:connectionId
+ * 연결 ID로 홈캠 검색
+ */
+exports.searchCameraByConnectionId = asyncHandler(async (req, res) => {
+    const requestLog = createRequestLog(req, 'SEARCH_CAMERA');
+    log('info', requestLog);
+
+    const { connectionId } = req.params;
+
+    // Redis 기반 연결 관리자에서 카메라 정보 검색
+    const cameraData = await connectionManager.getCamera(connectionId);
+
+    if (!cameraData) {
+        const responseLog = createResponseLog(res, 404, '해당 홈캠을 찾을 수 없습니다.');
+        log('warn', responseLog);
+        return errors.notFound(res, '해당 홈캠을 찾을 수 없습니다.');
+    }
+
+    const cameraId = cameraData.id ?? cameraData.cameraId;
+    const cameraName = cameraData.name ?? cameraData.cameraName;
+
+    const responseLog = createResponseLog(res, 200, '홈캠 검색 성공');
+    log('info', responseLog);
+
+    ok(res, {
+        cameraId,
+        cameraName,
+        connectionId,
+        status: cameraData.status
+    });
+});
+
+
+
+
+
+/**
+ * [GET] /cameras/search/pin/:pinCode  
+ * PIN 코드로 홈캠 검색
+ */
+exports.searchCameraByPinCode = asyncHandler(async (req, res) => {
+    const requestLog = createRequestLog(req, 'SEARCH_CAMERA_BY_PIN');
+    log('info', requestLog);
+
+    const { pinCode } = req.params;
+
+    // PIN 코드로 카메라 검색 (connectionManager에서 PIN 코드를 connectionId로 사용)
+    const cameraData = await connectionManager.getCamera(pinCode);
+
+    if (!cameraData) {
+        const responseLog = createResponseLog(res, 404, '해당 PIN 코드의 홈캠을 찾을 수 없습니다.');
+        log('warn', responseLog);
+        return errors.notFound(res, '해당 PIN 코드의 홈캠을 찾을 수 없습니다.');
+    }
+
+    const cameraId = cameraData.id ?? cameraData.cameraId;
+    const cameraName = cameraData.name ?? cameraData.cameraName;
+
+    const responseLog = createResponseLog(res, 200, 'PIN 코드로 홈캠 검색 성공');
+    log('info', responseLog);
+
+    ok(res, {
+        cameraId,
+        cameraName,
+        pinCode,
+        status: cameraData.status
+    });
+});
+
+/**
+ * [POST] /cameras/connect/pin/:pinCode
+ * PIN 코드로 홈캠에 연결
+ */
+exports.connectToCameraByPinCode = asyncHandler(async (req, res) => {
+    const requestLog = createRequestLog(req, 'CONNECT_TO_CAMERA_BY_PIN');
+    log('info', requestLog);
+
+    const { pinCode } = req.params;
+    const viewerId = req.user.userId;
+
+    // PIN 코드로 카메라 검색
+    const cameraData = await connectionManager.getCamera(pinCode);
+
+    if (!cameraData) {
+        const responseLog = createResponseLog(res, 404, 'PIN 코드가 올바르지 않거나 만료되었습니다.');
+        log('warn', responseLog);
+        return errors.notFound(res, 'PIN 코드가 올바르지 않거나 만료되었습니다.');
+    }
+
+    // 연결 등록
+    await connectionManager.connectViewer(pinCode, viewerId);
+
+    // 뷰어용 미디어 서버 URL 제공
+    const cameraId = String((cameraData.id ?? cameraData.cameraId));
+    const cameraName = cameraData.name ?? cameraData.cameraName;
+    const viewerUrl = buildLiveStreamUrl(cameraId, String(viewerId));
+
+    const responseLog = createResponseLog(res, 200, 'PIN 코드로 홈캠 연결 성공');
+    log('info', responseLog);
+
+    ok(res, {
+        cameraId: cameraId,
+        cameraName: cameraName,
+        pinCode,
+        viewerId,
+        media: {
+            viewerUrl
+        },
+        message: '홈캠에 성공적으로 연결되었습니다.'
+    });
+});
+
+/**
+ * [POST] /cameras/:connectionId/connect
+ * 홈캠에 연결
+ */
+exports.connectToCamera = asyncHandler(async (req, res) => {
+    const requestLog = createRequestLog(req, 'CONNECT_TO_CAMERA');
+    log('info', requestLog);
+
+    const { connectionId } = req.params;
+    const viewerId = req.user.userId;
+
+    // Redis 기반 연결 관리자에서 카메라 정보 검색
+    const cameraData = await connectionManager.getCamera(connectionId);
+
+    if (!cameraData) {
+        const responseLog = createResponseLog(res, 404, '해당 홈캠을 찾을 수 없습니다.');
+        log('warn', responseLog);
+        return errors.notFound(res, '해당 홈캠을 찾을 수 없습니다.');
+    }
+
+    const cameraId = cameraData.id ?? cameraData.cameraId;
+    const cameraName = cameraData.name ?? cameraData.cameraName;
+
+    // 연결 정보 생성
+    const connectionData = {
+        cameraId: cameraId,
+        cameraName: cameraName,
+        connectionId,
+        viewerId,
+        connectedAt: new Date(),
+        status: 'connected'
+    };
+
+    // Redis 기반 연결 관리자에 뷰어 연결 등록
+    await connectionManager.registerViewerConnection(connectionId, viewerId, connectionData);
+
+    // 뷰어용 미디어 서버 URL 제공
+    const viewerUrl = buildLiveStreamUrl(String(cameraId), String(viewerId));
+
+    const responseLog = createResponseLog(res, 200, '홈캠 연결 성공');
+    log('info', responseLog);
+
+    ok(res, {
+        connectionId,
+        cameraId: cameraId,
+        cameraName: cameraName,
+        viewerId,
+        media: {
+            viewerUrl
+        },
+        message: '홈캠에 성공적으로 연결되었습니다.'
+    });
+});
+
+/**
+ * [POST] /cameras/:connectionId/disconnect
+ * 홈캠 연결 해제
+ */
+exports.disconnectFromCamera = asyncHandler(async (req, res) => {
+    const requestLog = createRequestLog(req, 'DISCONNECT_FROM_CAMERA');
+    log('info', requestLog);
+
+    const { connectionId } = req.params;
+    const viewerId = req.user.userId;
+
+    // Redis 기반 연결 관리자에서 연결 정보 확인
+    const connectionData = await connectionManager.getViewerConnection(connectionId, viewerId);
+
+    if (!connectionData) {
+        const responseLog = createResponseLog(res, 404, '연결 정보를 찾을 수 없습니다.');
+        log('warn', responseLog);
+        return errors.notFound(res, '연결 정보를 찾을 수 없습니다.');
+    }
+
+    // Redis 기반 연결 관리자에서 뷰어 연결 해제
+    await connectionManager.unregisterViewerConnection(connectionId, viewerId);
+
+    const responseLog = createResponseLog(res, 200, '홈캠 연결 해제 성공');
+    log('info', responseLog);
+
+    ok(res, {
+        message: '홈캠 연결이 성공적으로 해제되었습니다.'
+    });
+});
+
+/**
+ * [GET] /cameras/:connectionId/viewers
+ * 카메라에 연결된 뷰어 목록 조회
+ */
+exports.getCameraViewers = asyncHandler(async (req, res) => {
+    const requestLog = createRequestLog(req, 'GET_CAMERA_VIEWERS');
+    log('info', requestLog);
+
+    const { connectionId } = req.params;
+
+    // 카메라 존재 확인
+    const cameraData = await connectionManager.getCamera(connectionId);
+    if (!cameraData) {
+        const responseLog = createResponseLog(res, 404, '해당 홈캠을 찾을 수 없습니다.');
+        log('warn', responseLog);
+        return errors.notFound(res, '해당 홈캠을 찾을 수 없습니다.');
+    }
+
+    // 카메라 소유자 확인
+    if (cameraData.userId !== req.user.userId) {
+        const responseLog = createResponseLog(res, 403, '카메라에 대한 접근 권한이 없습니다.');
+        log('warn', responseLog);
+        return errors.forbidden(res, '카메라에 대한 접근 권한이 없습니다.');
+    }
+
+    // Redis 기반 연결 관리자에서 뷰어 연결 목록 조회
+    const viewers = await connectionManager.getViewerConnections(connectionId);
+
+    const responseLog = createResponseLog(res, 200, '뷰어 목록 조회 성공');
+    log('info', responseLog);
+
+    ok(res, {
+        cameraId: cameraData.id,
+        cameraName: cameraData.name,
+        connectionId,
+        viewers: viewers.map(viewer => ({
+            viewerId: viewer.viewerId,
+            connectedAt: viewer.connectedAt,
+            status: viewer.status
+        }))
+    });
+});
+
+
+
+/**
+ * [POST] /cameras/:id/heartbeat
+ * 카메라 하트비트 업데이트
+ */
+exports.updateCameraHeartbeat = asyncHandler(async (req, res) => {
+    const requestLog = createRequestLog(req, 'UPDATE_CAMERA_HEARTBEAT');
+    log('info', requestLog);
+
+    const { id } = req.params;
+    const heartbeatData = req.body;
+
+    // 카메라 존재 확인
+    const camera = await cameraService.getCameraById(id, req.user.userId);
+    if (!camera) {
+        const responseLog = createResponseLog(res, 404, '카메라를 찾을 수 없습니다.');
+        log('warn', responseLog);
+        return errors.notFound(res, '카메라를 찾을 수 없습니다.');
+    }
+
+    // 하트비트 데이터 업데이트
+    const updatedCamera = await cameraService.updateCamera(id, {
+        lastSeen: new Date(),
+        status: 'online',
+        ...heartbeatData
+    }, req.user.userId);
+
+    const responseLog = createResponseLog(res, 200, '카메라 하트비트 업데이트 성공');
+    log('info', responseLog);
+
+    ok(res, {
+        camera: updatedCamera,
+        message: '하트비트가 성공적으로 업데이트되었습니다.'
+    });
+});
+
+/**
+ * [GET] /cameras/stats
+ * 카메라 연결 통계 조회
+ */
+exports.getCameraStats = asyncHandler(async (req, res) => {
+    const requestLog = createRequestLog(req, 'GET_CAMERA_STATS');
+    log('info', requestLog);
+
+    // Redis 기반 연결 관리자에서 통계 조회
+    const stats = await connectionManager.getStats();
+
+    const responseLog = createResponseLog(res, 200, '카메라 통계 조회 성공');
+    log('info', responseLog);
+
+    ok(res, stats);
+});
