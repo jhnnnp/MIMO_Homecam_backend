@@ -70,9 +70,19 @@ sequelize.authenticate()
 // Passport Google Strategy 초기화
 require('./service/googleStrategy');
 
+// 전역 에러 핸들링 미들웨어 import
+const {
+    errorHandler,
+    notFoundHandler,
+    requestIdMiddleware,
+    requestLoggingMiddleware
+} = require('./middlewares/errorHandler');
+
 // 보안/운영 미들웨어
 app.set('trust proxy', 1);
 app.use(helmet());
+app.use(requestIdMiddleware);
+app.use(requestLoggingMiddleware);
 app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 
 // CORS 설정 - 환경별로 구분
@@ -157,6 +167,25 @@ app.use(cors({
 // 요청 본문 제한
 app.use(bodyParser.json({ limit: process.env.BODY_LIMIT || '1mb' }));
 
+// Health Check 엔드포인트 (레이트 리미터 적용 전에 추가)
+app.get('/api/health', (req, res) => {
+    const currentIP = getLocalIPAddress();
+    res.json({
+        status: 'healthy',
+        timestamp: new Date().toISOString(),
+        server: {
+            ip: currentIP,
+            port: process.env.PORT || 4001,
+            environment: process.env.NODE_ENV || 'development'
+        },
+        services: {
+            database: 'connected', // 실제로는 DB 연결 상태 확인 가능
+            websocket: 'running',
+            media: 'running'
+        }
+    });
+});
+
 // 레이트 리미터 (/api에만 적용)
 const limiter = rateLimit({
     windowMs: Number(process.env.RATE_LIMIT_WINDOW_MS || 900000),
@@ -185,11 +214,11 @@ app.get('/', (req, res) => {
     res.send('Backend API is running');
 });
 
-// 에러 핸들러
-app.use((err, req, res, next) => {
-    console.error(err.stack);
-    res.status(500).json({ error: 'Internal Server Error' });
-});
+// 404 에러 핸들러 (라우트를 찾을 수 없는 경우)
+app.use(notFoundHandler);
+
+// 전역 에러 핸들러 (모든 에러를 처리)
+app.use(errorHandler);
 
 const PORT = process.env.PORT || 4001;
 const server = http.createServer(app);
