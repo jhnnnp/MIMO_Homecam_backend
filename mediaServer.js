@@ -7,6 +7,24 @@ const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
 const cors = require('cors');
+const crypto = require('crypto');
+
+const MAX_TOKEN_AGE_MS = Number(process.env.MEDIA_TOKEN_MAX_AGE_MS || 60_000); // 60s
+
+function getMediaTokenSecret() {
+    return process.env.MEDIA_TOKEN_SECRET || 'dev_media_secret_change_me';
+}
+
+function verifyHmacSignature({ type, cameraId, viewerId, ts, token }) {
+    if (!ts || !token || !type || !cameraId) return false;
+    const age = Date.now() - Number(ts);
+    if (Number.isNaN(age) || age < 0 || age > MAX_TOKEN_AGE_MS) return false;
+    const parts = [`type=${type}`, `cameraId=${cameraId}`, `ts=${ts}`];
+    if (viewerId) parts.push(`viewerId=${viewerId}`);
+    const canonical = parts.join('&');
+    const expected = crypto.createHmac('sha256', getMediaTokenSecret()).update(canonical).digest('hex');
+    return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(token));
+}
 
 class MediaServer {
     constructor(port = 4002) {
@@ -45,9 +63,18 @@ class MediaServer {
             const url = new URL(req.url, `http://${req.headers.host}`);
             const cameraId = url.searchParams.get('cameraId');
             const type = url.searchParams.get('type'); // 'publisher' or 'viewer'
+            const viewerId = url.searchParams.get('viewerId') || undefined;
+            const ts = url.searchParams.get('ts');
+            const token = url.searchParams.get('token');
 
             if (!cameraId) {
                 ws.close(1008, 'Camera ID required');
+                return;
+            }
+
+            // 토큰 검증
+            if (!verifyHmacSignature({ type, cameraId, viewerId, ts, token })) {
+                ws.close(1008, 'Invalid or expired token');
                 return;
             }
 
@@ -71,13 +98,30 @@ class MediaServer {
             status: 'live',
             startTime: new Date(),
             viewers: 0,
-            publisher: ws
+            publisher: ws,
+            meta: { codec: 'H264', width: 1280, height: 720, frameRate: 30, bitrate: 1000000 }
         });
 
         this.viewers.set(cameraId, new Set());
 
         ws.on('message', (data) => {
-            // 스트림 데이터를 모든 뷰어에게 브로드캐스트
+            // JSON 제어 메시지 처리 (메타데이터 협상 등)
+            if (typeof data === 'string' || data instanceof String) {
+                try {
+                    const msg = JSON.parse(data.toString());
+                    if (msg && msg.type === 'meta') {
+                        const stream = this.streams.get(cameraId);
+                        if (stream) {
+                            stream.meta = { ...stream.meta, ...msg.data };
+                        }
+                        return;
+                    }
+                } catch (_) {
+                    // binary frame로 처리
+                }
+            }
+
+            // 바이너리 프레임 브로드캐스트
             const viewers = this.viewers.get(cameraId);
             if (viewers) {
                 viewers.forEach(viewer => {
@@ -125,7 +169,8 @@ class MediaServer {
                 cameraId,
                 status: stream.status,
                 viewers: stream.viewers,
-                startTime: stream.startTime
+                startTime: stream.startTime,
+                meta: stream.meta
             }
         }));
 
@@ -156,7 +201,8 @@ class MediaServer {
                 id: stream.id,
                 status: stream.status,
                 viewers: stream.viewers,
-                startTime: stream.startTime
+                startTime: stream.startTime,
+                meta: stream.meta
             }));
 
             res.json({
@@ -183,7 +229,8 @@ class MediaServer {
                     id: stream.id,
                     status: stream.status,
                     viewers: stream.viewers,
-                    startTime: stream.startTime
+                    startTime: stream.startTime,
+                    meta: stream.meta
                 }
             });
         });

@@ -3,6 +3,8 @@
  * 환경변수 기반으로 안전한 미디어 서버 URL 생성
  */
 
+const crypto = require('crypto');
+
 function resolveMediaServerUrl() {
     const explicitUrl = process.env.MEDIA_SERVER_URL;
     if (explicitUrl && explicitUrl.trim()) {
@@ -11,6 +13,28 @@ function resolveMediaServerUrl() {
     const host = process.env.MEDIA_SERVER_HOST || 'localhost';
     const port = process.env.MEDIA_SERVER_PORT || '4002';
     return `ws://${host}:${port}`;
+}
+
+function getMediaTokenSecret() {
+    const secret = process.env.MEDIA_TOKEN_SECRET || 'dev_media_secret_change_me';
+    return secret;
+}
+
+function computeHmacSignature(payload) {
+    const secret = getMediaTokenSecret();
+    return crypto.createHmac('sha256', secret).update(payload).digest('hex');
+}
+
+function buildCanonicalString({ type, cameraId, viewerId, ts }) {
+    const parts = [`type=${type}`, `cameraId=${cameraId}`, `ts=${ts}`];
+    if (viewerId) parts.push(`viewerId=${viewerId}`);
+    return parts.join('&');
+}
+
+function signMediaParams({ type, cameraId, viewerId, ts }) {
+    const canonical = buildCanonicalString({ type, cameraId, viewerId, ts });
+    const token = computeHmacSignature(canonical);
+    return { token, ts };
 }
 
 /**
@@ -37,8 +61,9 @@ const buildMediaWsUrl = (options) => {
     const url = new URL(mediaServerUrl);
 
     // 기본 쿼리 파라미터 (mediaServer는 'type'을 기대함)
+    const type = role; // alias
     const queryParams = {
-        type: role, // 'publisher' | 'viewer'
+        type,
         cameraId,
         ...params
     };
@@ -47,6 +72,12 @@ const buildMediaWsUrl = (options) => {
     if (role === 'viewer' && viewerId) {
         queryParams.viewerId = viewerId;
     }
+
+    // 보안 서명 추가 (ts, token)
+    const ts = Date.now().toString();
+    const { token } = signMediaParams({ type, cameraId, viewerId, ts });
+    queryParams.ts = ts;
+    queryParams.token = token;
 
     // 쿼리 파라미터를 URL에 추가
     Object.entries(queryParams).forEach(([key, value]) => {
@@ -123,5 +154,9 @@ module.exports = {
     buildLiveStreamUrl,
     buildCameraStreamUrl,
     getDefaultMediaSettings,
-    buildHealthCheckUrl
+    buildHealthCheckUrl,
+    // internal helpers (useful for server verification)
+    signMediaParams,
+    buildCanonicalString,
+    resolveMediaServerUrl
 }; 
