@@ -8,6 +8,8 @@
     "start": "NODE_ENV=production node app.js",
     "websocket": "node websocket-server.js",
     "dev:websocket": "node --watch websocket-server.js",
+    "start:all": "node start-all.js",
+    "dev:all": "node --watch start-all.js",
     "test": "jest --runInBand",
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix"
@@ -39,6 +41,7 @@
     "passport": "0.7.0",
     "passport-google-oauth20": "2.0.0",
     "pino": "9.2.0",
+    "qrcode": "^1.5.4",
     "sequelize": "6.37.3",
     "uuid": "^9.0.1",
     "ws": "^8.18.3",
