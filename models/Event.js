@@ -27,6 +27,17 @@ const Event = sequelize.define('Event', {
     image_url: {
         type: DataTypes.STRING(255),
     },
+    started_at: {
+        type: DataTypes.DATE,
+        allowNull: false,
+    },
+    ended_at: {
+        type: DataTypes.DATE,
+        allowNull: true,
+    },
+    metadata: {
+        type: DataTypes.JSON,
+    },
     created_at: {
         type: DataTypes.DATE,
         defaultValue: DataTypes.NOW,

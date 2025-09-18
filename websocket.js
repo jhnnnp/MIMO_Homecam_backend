@@ -471,6 +471,89 @@ class WebSocketServer {
         const ws = this.clients.get(userId);
         return ws && ws.readyState === WebSocket.OPEN;
     }
+
+    /**
+     * 연결 상태 업데이트 브로드캐스트 (PIN/QR 통합)
+     */
+    broadcastConnectionStatusUpdate(connectionId, connectionType, status, userIds = null) {
+        const message = {
+            type: 'connection_status_update',
+            data: {
+                connectionId,
+                connectionType, // 'pin' 또는 'qr'
+                status, // 'active', 'expired', 'refreshed'
+                timestamp: new Date().toISOString()
+            }
+        };
+
+        if (userIds) {
+            userIds.forEach(userId => this.sendToUser(userId, message));
+        } else {
+            this.broadcast(message);
+        }
+    }
+
+    /**
+     * 연결 갱신 알림 브로드캐스트
+     */
+    broadcastConnectionRefresh(oldConnectionId, newConnectionId, connectionType, userIds = null) {
+        const message = {
+            type: 'connection_refreshed',
+            data: {
+                oldConnectionId,
+                newConnectionId,
+                connectionType,
+                timestamp: new Date().toISOString()
+            }
+        };
+
+        if (userIds) {
+            userIds.forEach(userId => this.sendToUser(userId, message));
+        } else {
+            this.broadcast(message);
+        }
+    }
+
+    /**
+     * 뷰어 카운트 업데이트 브로드캐스트
+     */
+    broadcastViewerCountUpdate(connectionId, viewerCount, userIds = null) {
+        const message = {
+            type: 'viewer_count_update',
+            data: {
+                connectionId,
+                viewerCount,
+                timestamp: new Date().toISOString()
+            }
+        };
+
+        if (userIds) {
+            userIds.forEach(userId => this.sendToUser(userId, message));
+        } else {
+            this.broadcast(message);
+        }
+    }
+
+    /**
+     * 연결 만료 경고 브로드캐스트
+     */
+    broadcastConnectionExpirationWarning(connectionId, connectionType, timeLeft, userIds = null) {
+        const message = {
+            type: 'connection_expiration_warning',
+            data: {
+                connectionId,
+                connectionType,
+                timeLeft, // 남은 시간 (초)
+                timestamp: new Date().toISOString()
+            }
+        };
+
+        if (userIds) {
+            userIds.forEach(userId => this.sendToUser(userId, message));
+        } else {
+            this.broadcast(message);
+        }
+    }
 }
 
 module.exports = WebSocketServer; 

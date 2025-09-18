@@ -15,6 +15,14 @@ const Recording = sequelize.define('Recording', {
         type: DataTypes.INTEGER,
         allowNull: false,
     },
+    event_id: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+    },
+    index_num: {
+        type: DataTypes.INTEGER,
+        defaultValue: 0,
+    },
     filename: {
         type: DataTypes.STRING(255),
     },

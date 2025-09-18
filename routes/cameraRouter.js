@@ -8,6 +8,7 @@ const authMiddleware = require("../middlewares/authMiddleware");
 router.use(authMiddleware);
 
 router.get("/", CameraController.getCameras);
+router.get("/count", CameraController.getCameraCount);
 router.get("/:id", CameraController.getCameraById);
 router.put("/:id", CameraController.updateCamera);
 router.delete("/:id", CameraController.deleteCamera);
@@ -17,6 +18,9 @@ router.get("/:id/stream", CameraController.getLiveStream);
 
 // QR 코드 관련 엔드포인트 추가
 router.post("/:id/qr-code", QRController.generateQRCode);
+
+// 홈캠 등록 엔드포인트
+router.post("/register-with-code", QRController.registerCameraWithCode);
 
 // 홈캠 등록/검색 엔드포인트
 router.post("/register", CameraController.registerCamera);

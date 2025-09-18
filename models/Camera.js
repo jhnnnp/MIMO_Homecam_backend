@@ -7,7 +7,7 @@ const Camera = sequelize.define('Camera', {
         autoIncrement: true,
         primaryKey: true,
     },
-    user_id: {
+    owner_id: {
         type: DataTypes.INTEGER,
         allowNull: false,
     },
@@ -33,6 +33,10 @@ const Camera = sequelize.define('Camera', {
         type: DataTypes.STRING(50),
     },
     settings: { type: DataTypes.JSON },
+    stream_url: {
+        type: DataTypes.STRING(500),
+        allowNull: true,
+    },
     created_at: {
         type: DataTypes.DATE,
         defaultValue: DataTypes.NOW,
