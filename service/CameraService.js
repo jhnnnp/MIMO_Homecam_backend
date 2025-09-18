@@ -1,4 +1,4 @@
-const { Camera, User, Event } = require('../models');
+const { Camera, User, Event, DevicePermissions } = require('../models');
 const { Op } = require('sequelize');
 
 /**
@@ -11,12 +11,12 @@ const { Op } = require('sequelize');
 async function getCamerasByUserId(userId) {
     try {
         const cameras = await Camera.findAll({
-            where: { user_id: userId },
+            where: { owner_id: userId },
             order: [['created_at', 'DESC']],
             include: [
                 {
                     model: User,
-                    as: 'user',
+                    as: 'owner',
                     attributes: ['id', 'email', 'name']
                 }
             ]
@@ -39,7 +39,7 @@ async function getCamerasByUserId(userId) {
 async function getCameraCountByUserId(userId) {
     try {
         const count = await Camera.count({
-            where: { user_id: userId }
+            where: { owner_id: userId }
         });
 
         return count;
@@ -61,7 +61,7 @@ async function getCameraById(cameraId, userId) {
         const camera = await Camera.findOne({
             where: {
                 id: cameraId,
-                user_id: userId
+                owner_id: userId
             },
             include: [
                 {
@@ -94,7 +94,7 @@ async function createCamera(cameraData, userId) {
     try {
         const camera = await Camera.create({
             ...cameraData,
-            user_id: userId,
+            owner_id: userId,
             status: 'offline',
             created_at: new Date(),
             updated_at: new Date()
@@ -114,7 +114,7 @@ async function createCamera(cameraData, userId) {
  */
 async function createOrUpdateCameraByDeviceId(deviceId, name, userId, status = 'offline') {
     try {
-        let camera = await Camera.findOne({ where: { device_id: deviceId, user_id: userId } });
+        let camera = await Camera.findOne({ where: { device_id: deviceId, owner_id: userId } });
 
         if (camera) {
             await camera.update({ name, status, updated_at: new Date() });
@@ -124,7 +124,7 @@ async function createOrUpdateCameraByDeviceId(deviceId, name, userId, status = '
         camera = await Camera.create({
             device_id: deviceId,
             name,
-            user_id: userId,
+            owner_id: userId,
             status,
             created_at: new Date(),
             updated_at: new Date()
@@ -148,7 +148,7 @@ async function updateCamera(cameraId, updateData, userId) {
         const camera = await Camera.findOne({
             where: {
                 id: cameraId,
-                user_id: userId
+                owner_id: userId
             }
         });
 
@@ -180,7 +180,7 @@ async function deleteCamera(cameraId, userId) {
         const camera = await Camera.findOne({
             where: {
                 id: cameraId,
-                user_id: userId
+                owner_id: userId
             }
         });
 
@@ -330,6 +330,199 @@ async function cleanupOfflineCameras() {
     }
 }
 
+/**
+ * 설명: 사용자가 접근 가능한 모든 카메라 목록 조회 (소유 + 공유받은)
+ * 입력: userId
+ * 출력: 카메라 목록 (소유자 정보 및 권한 레벨 포함)
+ * 부작용: DB 조회
+ * 예외: throw codes E_DATABASE_ERROR
+ */
+async function getAccessibleCamerasByUserId(userId) {
+    try {
+        // 1. 소유한 카메라 조회
+        const ownedCameras = await Camera.findAll({
+            where: { owner_id: userId },
+            include: [
+                {
+                    model: User,
+                    as: 'owner',
+                    attributes: ['id', 'email', 'name']
+                }
+            ]
+        });
+
+        // 소유한 카메라에 권한 레벨 추가
+        const ownedCamerasWithPermission = ownedCameras.map(camera => {
+            const cameraData = camera.toJSON();
+            cameraData.permission_level = 'admin';
+            cameraData.access_type = 'owner';
+            return cameraData;
+        });
+
+        // 2. 공유받은 카메라 조회
+        const sharedCameras = await DevicePermissions.findAll({
+            where: { 
+                user_id: userId,
+                is_active: true,
+                [Op.or]: [
+                    { expires_at: null },
+                    { expires_at: { [Op.gt]: new Date() } }
+                ]
+            },
+            include: [
+                {
+                    model: Camera,
+                    as: 'camera',
+                    include: [
+                        {
+                            model: User,
+                            as: 'owner',
+                            attributes: ['id', 'email', 'name']
+                        }
+                    ]
+                }
+            ]
+        });
+
+        // 공유받은 카메라에 권한 정보 추가
+        const sharedCamerasWithPermission = sharedCameras.map(permission => {
+            const cameraData = permission.camera.toJSON();
+            cameraData.permission_level = permission.permission_level;
+            cameraData.access_type = 'shared';
+            cameraData.granted_at = permission.granted_at;
+            cameraData.expires_at = permission.expires_at;
+            return cameraData;
+        });
+
+        // 3. 결과 합치기
+        const allCameras = [...ownedCamerasWithPermission, ...sharedCamerasWithPermission];
+        
+        return allCameras.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    } catch (error) {
+        console.error('접근 가능한 카메라 목록 조회 실패:', error);
+        throw new Error('카메라 목록을 조회할 수 없습니다.');
+    }
+}
+
+/**
+ * 설명: 카메라 공유 권한 부여
+ * 입력: cameraId, targetUserId, permissionLevel, grantedByUserId, options
+ * 출력: 생성된 권한 정보
+ * 부작용: DB 삽입
+ * 예외: throw codes E_CAMERA_NOT_FOUND, E_PERMISSION_DENIED, E_DATABASE_ERROR
+ */
+async function grantCameraPermission(cameraId, targetUserId, permissionLevel, grantedByUserId, options = {}) {
+    try {
+        // 1. 카메라 존재 및 소유권 확인
+        const camera = await Camera.findOne({
+            where: { id: cameraId, owner_id: grantedByUserId }
+        });
+
+        if (!camera) {
+            throw new Error('카메라를 찾을 수 없거나 권한이 없습니다.');
+        }
+
+        // 2. 대상 사용자 존재 확인
+        const targetUser = await User.findByPk(targetUserId);
+        if (!targetUser) {
+            throw new Error('대상 사용자를 찾을 수 없습니다.');
+        }
+
+        // 3. 기존 권한 확인 및 업데이트
+        const existingPermission = await DevicePermissions.findOne({
+            where: { camera_id: cameraId, user_id: targetUserId }
+        });
+
+        let permission;
+        if (existingPermission) {
+            // 기존 권한 업데이트
+            permission = await existingPermission.update({
+                permission_level: permissionLevel,
+                granted_by: grantedByUserId,
+                granted_at: new Date(),
+                expires_at: options.expires_at || null,
+                is_active: true,
+                notes: options.notes || null
+            });
+        } else {
+            // 새 권한 생성
+            permission = await DevicePermissions.create({
+                camera_id: cameraId,
+                user_id: targetUserId,
+                permission_level: permissionLevel,
+                granted_by: grantedByUserId,
+                granted_at: new Date(),
+                expires_at: options.expires_at || null,
+                is_active: true,
+                notes: options.notes || null
+            });
+        }
+
+        return permission;
+    } catch (error) {
+        console.error('카메라 권한 부여 실패:', error);
+        throw error;
+    }
+}
+
+/**
+ * 설명: 사용자의 카메라 접근 권한 확인
+ * 입력: cameraId, userId
+ * 출력: 권한 정보 (소유자인 경우 admin, 공유받은 경우 해당 레벨, 없으면 null)
+ * 부작용: DB 조회
+ * 예외: throw codes E_DATABASE_ERROR
+ */
+async function getUserCameraPermission(cameraId, userId) {
+    try {
+        // 1. 소유자인지 확인
+        const ownedCamera = await Camera.findOne({
+            where: { id: cameraId, owner_id: userId }
+        });
+
+        if (ownedCamera) {
+            return {
+                access_type: 'owner',
+                permission_level: 'admin',
+                camera: ownedCamera
+            };
+        }
+
+        // 2. 공유받은 권한 확인
+        const sharedPermission = await DevicePermissions.findOne({
+            where: { 
+                camera_id: cameraId,
+                user_id: userId,
+                is_active: true,
+                [Op.or]: [
+                    { expires_at: null },
+                    { expires_at: { [Op.gt]: new Date() } }
+                ]
+            },
+            include: [
+                {
+                    model: Camera,
+                    as: 'camera'
+                }
+            ]
+        });
+
+        if (sharedPermission) {
+            return {
+                access_type: 'shared',
+                permission_level: sharedPermission.permission_level,
+                camera: sharedPermission.camera,
+                granted_at: sharedPermission.granted_at,
+                expires_at: sharedPermission.expires_at
+            };
+        }
+
+        return null; // 접근 권한 없음
+    } catch (error) {
+        console.error('사용자 카메라 권한 확인 실패:', error);
+        throw error;
+    }
+}
+
 module.exports = {
     getCamerasByUserId,
     getCameraCountByUserId,
@@ -341,5 +534,9 @@ module.exports = {
     updateCameraStatus,
     getCameraStats,
     cleanupOfflineCameras,
-    createOrUpdateCameraByDeviceId
+    createOrUpdateCameraByDeviceId,
+    // 새로운 공유 기능
+    getAccessibleCamerasByUserId,
+    grantCameraPermission,
+    getUserCameraPermission
 };
