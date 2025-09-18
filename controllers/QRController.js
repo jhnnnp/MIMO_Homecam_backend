@@ -170,3 +170,44 @@ exports.getActiveConnections = async (req, res) => {
         });
     }
 };
+
+/**
+ * PIN/QR 코드로 홈캠 등록
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ */
+exports.registerCameraWithCode = async (req, res) => {
+    try {
+        const { code, type } = req.body; // code: PIN 또는 QR 데이터, type: 'pin' | 'qr'
+        const userId = req.user.userId;
+
+        if (!code || !type) {
+            return res.status(400).json({
+                ok: false,
+                error: {
+                    code: "E_MISSING_CODE",
+                    message: "연결 코드와 타입이 필요합니다."
+                }
+            });
+        }
+
+
+        // QR/PIN 코드로 홈캠 등록 처리
+        const registrationResult = await qrCodeService.registerCameraWithCode(code, type, userId);
+
+        res.json({
+            ok: true,
+            data: registrationResult,
+            message: "홈캠이 성공적으로 등록되었습니다."
+        });
+    } catch (error) {
+        console.error("홈캠 등록 에러:", error.message);
+        res.status(400).json({
+            ok: false,
+            error: {
+                code: "E_CAMERA_REGISTRATION_FAILED",
+                message: error.message || "홈캠 등록에 실패했습니다."
+            }
+        });
+    }
+};
