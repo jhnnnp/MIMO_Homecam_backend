@@ -25,31 +25,48 @@
 
 ## 🎯 개요
 
-MIMO Camera Backend는 홈 카메라 시스템을 위한 확장 가능한 REST API 서버입니다. 실시간 비디오 스트리밍, 클라우드 저장소, 사용자 인증, 디바이스 관리를 제공합니다.
+MIMO Camera Backend는 **항상 대기 중인 홈캠**과 **뷰어 간의 실시간 연결**을 지원하는 REST API 서버입니다. QR/PIN 기반 간편 연결, 실시간 스트리밍, 클라우드 저장소를 제공합니다.
+
+### 🏠 홈캠 시스템의 본질
+
+MIMO는 전통적인 홈캠의 본질을 그대로 구현합니다:
+- **홈캠**: 거치해놓고 계속 촬영하는 카메라 (항상 대기 상태)
+- **뷰어**: 언제든 홈캠에 접속하여 실시간 화면을 시청
+- **간편 연결**: QR 코드 스캔 또는 PIN 입력으로 즉시 연결
 
 ### 핵심 특징
 
-- 🔐 **보안 우선**: JWT 인증, 이메일 인증, 레이트 리미팅
+- 🎥 **항상 대기**: 홈캠 앱 실행 시 자동으로 연결 대기 상태
+- 📱 **간편 연결**: QR 스캔 또는 6자리 PIN 입력으로 즉시 연결
+- 🔐 **보안 우선**: JWT 인증, 이메일 인증, 연결 코드 만료 관리
 - 👥 **다중 사용자**: 이메일 기반 사용자 관리 및 권한 제어
-- 📡 **실시간 통신**: WebSocket 기반 시그널링 서버 (준비 중)
+- 📡 **실시간 통신**: WebSocket 기반 스트리밍 및 상태 동기화
 - ☁️ **클라우드 네이티브**: S3 호환 저장소, 컨테이너화
 - 📊 **모니터링**: 헬스체크, 구조화된 로깅
 - 🏗️ **깔끔한 아키텍처**: Controller-Service 패턴으로 관심사 분리
 
 ## 🚀 주요 기능
 
-### 인증 & 권한 관리
+### 🏠 홈캠-뷰어 연결 시스템
+- **항상 대기**: 홈캠 앱 실행 시 자동으로 연결 대기 상태
+- **QR/PIN 생성**: 홈캠에서 6자리 PIN과 QR 코드 동시 생성
+- **즉시 연결**: 뷰어에서 QR 스캔 또는 PIN 입력으로 즉시 연결
+- **연결 코드 관리**: 만료 시간 설정, 자동 갱신, 보안 검증
+- **실시간 상태**: WebSocket 기반 연결 상태 실시간 동기화
+
+### 🔐 인증 & 권한 관리
 - 이메일/비밀번호 로그인
 - Google OAuth 2.0 로그인
 - JWT Access/Refresh Token 시스템
 - 이메일 인증 시스템 (6자리 인증 코드)
 - 세션 관리 및 디바이스별 권한 제어
 
-### 디바이스 관리
+### 📱 디바이스 관리
 - 카메라 디바이스 등록 및 관리
-- 실시간 상태 모니터링 (온라인/오프라인)
+- 실시간 상태 모니터링 (연결 대기/활성/비활성)
 - 디바이스 설정 및 메타데이터 관리
 - 하트비트 시스템으로 연결 상태 추적
+- 다중 뷰어 동시 접속 지원
 
 ### 이벤트 & 미디어 처리
 - 동영상 이벤트 자동 감지 및 저장
@@ -204,16 +221,22 @@ POST /api/profile/verify-email           # 이메일 인증 코드 확인
 GET  /api/profile/email-verification-status  # 이메일 인증 상태 확인
 ```
 
-#### 카메라 API
+#### 홈캠 연결 API
 ```http
 GET  /api/cameras                 # 카메라 목록 조회
 POST /api/cameras                 # 새 카메라 등록
 GET  /api/cameras/:id             # 카메라 상세 조회
 PUT  /api/cameras/:id             # 카메라 업데이트
 DELETE /api/cameras/:id           # 카메라 삭제
-POST /api/cameras/:id/heartbeat   # 하트비트 전송
+POST /api/cameras/:id/heartbeat   # 하트비트 전송 (연결 상태 유지)
 GET  /api/cameras/:id/stats       # 카메라 통계 조회
-GET  /api/cameras/:id/live-stream # 라이브 스트림 정보
+
+# 연결 코드 관리
+POST /api/qr/generate             # QR/PIN 코드 생성 (홈캠용)
+POST /api/qr/validate             # QR/PIN 코드 검증 (뷰어용)
+GET  /api/qr/:code/info           # 연결 코드 정보 조회
+POST /api/connection/establish    # 홈캠-뷰어 연결 설정
+GET  /api/connection/active       # 활성 연결 목록 조회
 ```
 
 #### 이벤트 API
@@ -296,22 +319,31 @@ GET  /api/clips/:id/presign-get   # 다운로드용 Presigned URL
 
 ## 🏗 아키텍처
 
-### 시스템 아키텍처
+### 홈캠-뷰어 시스템 아키텍처
 
 ```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Camera App    │    │   Viewer App    │    │   Web Dashboard │
-│   (모바일)      │    │   (모바일)      │    │   (웹)          │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-         │                       │                       │
-         └───────────────────────┼───────────────────────┘
-                                 │
+┌─────────────────┐                    ┌─────────────────┐
+│   홈캠 앱       │                    │   뷰어 앱       │
+│   (항상 대기)   │                    │   (연결 요청)   │
+│                 │                    │                 │
+│ 1. 앱 실행      │                    │ 1. QR 스캔      │
+│ 2. 연결 대기    │ ◄──────────────────┤ 2. PIN 입력     │
+│ 3. QR/PIN 생성  │                    │ 3. 즉시 연결    │
+└─────────────────┘                    └─────────────────┘
+         │                                       │
+         └───────────────────┬───────────────────┘
+                             │
          ┌───────────────────────────────────────────────┐
          │              MIMO Backend API                 │
          │  ┌─────────────┐  ┌─────────────┐            │
          │  │  REST API   │  │ WebSocket   │            │
-         │  │   Server    │  │  Signaling  │            │
-         │  │             │  │  (준비 중)   │            │
+         │  │   Server    │  │  Streaming  │            │
+         │  │             │  │             │            │
+         │  └─────────────┘  └─────────────┘            │
+         │                                               │
+         │  ┌─────────────┐  ┌─────────────┐            │
+         │  │ QR/PIN 관리 │  │ 연결 상태   │            │
+         │  │ 만료 처리   │  │ 실시간 동기 │            │
          │  └─────────────┘  └─────────────┘            │
          └───────────────────────────────────────────────┘
                                  │
@@ -320,6 +352,9 @@ GET  /api/clips/:id/presign-get   # 다운로드용 Presigned URL
 ┌───▼───┐    ┌───▼───┐    ┌─────▼─────┐    ┌───▼───┐    ┌───▼───┐
 │ MySQL │    │ Email │    │    S3     │    │ Logs  │    │ JWT   │
 │  DB   │    │Service│    │ Storage   │    │ Store │    │Tokens │
+│       │    │       │    │           │    │       │    │       │
+│연결코드│    │인증   │    │미디어저장 │    │시스템 │    │보안   │
+│관리   │    │시스템 │    │           │    │로그   │    │토큰   │
 └───────┘    └───────┘    └───────────┘    └───────┘    └───────┘
 ```
 
@@ -738,3 +773,237 @@ Closes #123
 ---
 
 **MIMO Camera Team**과 함께 만들어가는 오픈소스 홈 카메라 솔루션입니다. 🎥✨ 
+
+# MIMO 데이터베이스 설계 분석 보고서
+
+## 📊 전체 아키텍처 개요
+
+MIMO 홈캠 프로젝트는 **MySQL 8.0** 기반의 관계형 데이터베이스를 사용하며, **Sequelize ORM**을 통해 Node.js와 연동되어 있습니다.
+
+### 🗄️ 데이터베이스 구성
+- **데이터베이스명**: `mimo_homecam_db`
+- **문자셋**: `utf8mb4_unicode_ci`
+- **ORM**: Sequelize v6.x
+- **연결 풀**: 최대 5개 연결, 30초 타임아웃
+
+## 🏗️ 테이블 구조 및 관계
+
+### 1️⃣ 핵심 엔티티 테이블
+
+#### **User** (사용자 관리)
+```sql
+- id (PK, AUTO_INCREMENT)
+- email (UNIQUE, NOT NULL) - 로그인 식별자
+- password_hash (VARCHAR 255) - bcrypt 해시
+- name (VARCHAR 50, NOT NULL) - 실명
+- nickname (VARCHAR 50) - 사용자 닉네임
+- bio (TEXT) - 소개글
+- phone (VARCHAR 20) - 휴대폰 번호
+- birth (DATE) - 생년월일
+- picture (TEXT) - 프로필 사진 URL
+- email_verified (BOOLEAN, DEFAULT FALSE) - 이메일 인증 상태
+- google_id (UNIQUE) - Google OAuth ID
+- provider (VARCHAR 20, DEFAULT 'local') - 로그인 제공자
+- created_at, updated_at (TIMESTAMP)
+```
+
+#### **Camera** (카메라 디바이스)
+```sql
+- id (PK, AUTO_INCREMENT)
+- user_id (FK → User.id, NOT NULL)
+- name (VARCHAR 100, NOT NULL) - 카메라 이름
+- device_id (VARCHAR 255, UNIQUE) - 하드웨어 식별자
+- location (VARCHAR 100) - 설치 위치
+- status (ENUM: 'online', 'offline', 'error') - 연결 상태
+- last_seen (TIMESTAMP) - 마지막 활동 시간
+- last_heartbeat (TIMESTAMP) - 마지막 하트비트
+- firmware (VARCHAR 50) - 펌웨어 버전
+- settings (JSON) - 카메라 설정 정보
+- created_at, updated_at (TIMESTAMP)
+```
+
+#### **Event** (이벤트 감지)
+```sql
+- id (PK, AUTO_INCREMENT)
+- camera_id (FK → Camera.id, NOT NULL)
+- type (ENUM: 'motion', 'sound', 'manual', 'scheduled')
+- started_at (TIMESTAMP, NOT NULL) - 이벤트 시작 시간
+- ended_at (TIMESTAMP) - 이벤트 종료 시간
+- duration (INT, DEFAULT 0) - 지속 시간(초)
+- score (DECIMAL 5,2) - 감지 신뢰도
+- is_pinned (BOOLEAN, DEFAULT FALSE) - 중요 표시
+- metadata (JSON) - 추가 메타데이터
+- confidence (FLOAT) - 감지 정확도
+- acknowledged (BOOLEAN, DEFAULT FALSE) - 확인 여부
+- image_url (VARCHAR 255) - 썸네일 이미지 URL
+```
+
+#### **Recording** (녹화 파일)
+```sql
+- id (PK, AUTO_INCREMENT)
+- event_id (FK → Event.id, NOT NULL)
+- camera_id (FK → Camera.id, NOT NULL)
+- user_id (FK → User.id, NOT NULL)
+- index_num (INT, DEFAULT 0) - 분할 파일 순서
+- s3_key (VARCHAR 500, NOT NULL) - S3 저장 키
+- filename (VARCHAR 255) - 원본 파일명
+- started_at, ended_at (TIMESTAMP) - 녹화 시간
+- duration (INT, DEFAULT 0) - 재생 시간(초)
+- file_size (BIGINT, DEFAULT 0) - 파일 크기(바이트)
+- format (VARCHAR 10, DEFAULT 'mp4') - 파일 형식
+```
+
+### 2️⃣ 인증 및 보안 테이블
+
+#### **EmailVerification** (이메일 인증)
+```sql
+- id (PK, AUTO_INCREMENT)
+- user_id (FK → User.id, NOT NULL)
+- email (VARCHAR 255, NOT NULL)
+- verification_code (VARCHAR 6, NOT NULL) - 6자리 인증 코드
+- is_verified (BOOLEAN, DEFAULT FALSE)
+- expires_at (TIMESTAMP, NOT NULL) - 만료 시간
+- created_at (TIMESTAMP)
+```
+
+#### **RefreshToken** (JWT 토큰 관리)
+```sql
+- id (PK, AUTO_INCREMENT)
+- user_id (FK → User.id, NOT NULL)
+- token (VARCHAR 500, NOT NULL) - 리프레시 토큰
+- expires_at (TIMESTAMP, NOT NULL)
+- created_at (TIMESTAMP)
+```
+
+#### **TermsAgreement** (약관 동의)
+```sql
+- id (PK, AUTO_INCREMENT)
+- user_id (FK → User.id, NOT NULL)
+- agree_terms (BOOLEAN, DEFAULT FALSE) - 이용약관
+- agree_privacy (BOOLEAN, DEFAULT FALSE) - 개인정보처리방침
+- agree_microphone (BOOLEAN, DEFAULT FALSE) - 마이크 권한
+- agree_location (BOOLEAN, DEFAULT FALSE) - 위치 권한
+- agree_marketing (BOOLEAN, DEFAULT FALSE) - 마케팅 수신
+- created_at (TIMESTAMP)
+```
+
+### 3️⃣ 사용자 경험 테이블
+
+#### **Notification** (알림 시스템)
+```sql
+- id (PK, AUTO_INCREMENT)
+- user_id (FK → User.id, NOT NULL)
+- type (ENUM: 'motion', 'system', 'security', 'maintenance')
+- title (VARCHAR 200, NOT NULL) - 알림 제목
+- message (TEXT, NOT NULL) - 알림 내용
+- is_read (BOOLEAN, DEFAULT FALSE) - 읽음 상태
+- priority (ENUM: 'low', 'medium', 'high', 'critical')
+- metadata (JSON) - 추가 데이터
+- created_at (TIMESTAMP)
+```
+
+#### **Settings** (사용자 설정)
+```sql
+- id (PK, AUTO_INCREMENT)
+- user_id (FK → User.id, NOT NULL, UNIQUE)
+- notification_enabled (BOOLEAN, DEFAULT TRUE)
+- email_notification (BOOLEAN, DEFAULT TRUE)
+- motion_sensitivity (INT, DEFAULT 50) - 1-100 범위
+- recording_quality (ENUM: 'low', 'medium', 'high')
+- storage_days (INT, DEFAULT 30) - 보관 기간
+- app_lock_enabled (BOOLEAN, DEFAULT FALSE)
+- app_lock_pin (VARCHAR 6) - 앱 잠금 PIN
+- key (VARCHAR 50) - 설정 키
+- value (TEXT) - 설정 값
+- created_at, updated_at (TIMESTAMP)
+```
+
+## 🔗 테이블 관계도
+
+```
+<code_block_to_apply_changes_from>
+```
+
+## 📈 인덱스 최적화
+
+### 성능 최적화 인덱스
+```sql
+-- 사용자 검색 최적화
+CREATE INDEX idx_email ON User(email);
+CREATE INDEX idx_google_id ON User(google_id);
+CREATE INDEX idx_users_created_at ON User(created_at);
+
+-- 카메라 관리 최적화
+CREATE INDEX idx_user_id ON Camera(user_id);
+CREATE INDEX idx_device_id ON Camera(device_id);
+CREATE INDEX idx_status ON Camera(status);
+
+-- 이벤트 검색 최적화
+CREATE INDEX idx_camera_id ON Event(camera_id);
+CREATE INDEX idx_started_at ON Event(started_at);
+CREATE INDEX idx_type ON Event(type);
+CREATE INDEX idx_is_pinned ON Event(is_pinned);
+CREATE INDEX idx_events_camera_started ON Event(camera_id, started_at);
+
+-- 알림 성능 최적화
+CREATE INDEX idx_notifications_user_created ON Notification(user_id, created_at);
+CREATE INDEX idx_is_read ON Notification(is_read);
+
+-- 인증 관련 최적화
+CREATE INDEX idx_verification_code ON EmailVerification(verification_code);
+CREATE INDEX idx_expires_at ON EmailVerification(expires_at);
+CREATE INDEX idx_token ON RefreshToken(token);
+```
+
+## 🔒 보안 설계
+
+### 1. 데이터 보호
+- **비밀번호**: bcrypt 해싱 (salt rounds 12)
+- **JWT 토큰**: 리프레시 토큰 방식으로 보안 강화
+- **이메일 인증**: 6자리 코드, 10분 만료
+- **외래키 제약**: CASCADE 삭제로 데이터 무결성 보장
+
+### 2. 개인정보 관리
+- **약관 동의**: 법적 요구사항 준수
+- **데이터 보관**: 설정 가능한 보관 기간
+- **OAuth 연동**: Google 로그인 지원
+
+## 🚀 마이그레이션 시스템
+
+### 현재 마이그레이션 파일들
+1. `20250127000000-create-user-table.js` - 사용자 테이블 생성
+2. `20250127000003-create-terms-agreement-table.js` - 약관 동의 테이블
+3. `20250127000005-add-google-fields-to-user.js` - Google OAuth 필드
+4. `20250127000006-add-nickname-and-bio-to-user.js` - 프로필 필드
+5. `20250127000007-add-phone-and-emailVerified-to-user.js` - 연락처 필드
+6. `20250127000011-update-notification-table.js` - 알림 테이블 업데이트
+7. `20250127000012-remove-sound-related-fields.js` - 사운드 필드 제거
+8. `20250127000013-email-verification-system.js` - 이메일 인증 시스템
+9. `20250904000000-add-deviceid-and-stream-columns-to-camera.sql` - 카메라 필드 추가
+
+## ⚠️ 데이터베이스 설계 이슈 및 개선점
+
+### 🔍 발견된 문제점
+
+1. **스키마 불일치**: 
+   - `database-schema.sql`과 Sequelize 모델 간 필드명 차이
+   - 일부 테이블에서 컬럼 정의 불일치
+
+2. **모델 정의 문제**:
+   - `Event` 모델에 `started_at`, `ended_at` 필드 누락
+   - `Recording` 모델에 `event_id` 관계 누락
+   - `Settings` 모델이 key-value 구조와 고정 필드 구조 혼재
+
+3. **인덱스 부족**:
+   - 복합 인덱스 최적화 필요
+   - JSON 필드 검색 인덱스 미적용
+
+### 💡 권장 개선사항
+
+1. **스키마 통일**: SQL 스키마와 Sequelize 모델 동기화
+2. **관계 정의**: 누락된 외래키 관계 추가
+3. **JSON 필드 최적화**: MySQL 8.0 JSON 함수 활용
+4. **파티셔닝**: 대용량 이벤트/녹화 데이터 월별 파티셔닝
+5. **아카이빙**: 오래된 데이터 자동 아카이빙 시스템
+
+이러한 데이터베이스 설계는 홈캠 시스템의 실시간 모니터링, 이벤트 감지, 녹화 관리 등의 핵심 기능을 효과적으로 지원하도록 구성되어 있습니다. 
