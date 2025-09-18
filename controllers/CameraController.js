@@ -26,6 +26,22 @@ exports.getCameras = asyncHandler(async (req, res) => {
 });
 
 /**
+ * [GET] /cameras/count
+ * 사용자의 등록된 카메라 수 조회
+ */
+exports.getCameraCount = asyncHandler(async (req, res) => {
+    const requestLog = createRequestLog(req, 'GET_CAMERA_COUNT');
+    log('info', requestLog);
+
+    const count = await cameraService.getCameraCountByUserId(req.user.userId);
+
+    const responseLog = createResponseLog(res, 200, '카메라 수 조회 성공');
+    log('info', responseLog);
+
+    ok(res, { count, hasRegisteredCameras: count > 0 });
+});
+
+/**
  * [GET] /cameras/:id
  * 특정 카메라 상세 정보 조회
  */
@@ -489,4 +505,42 @@ exports.getCameraStats = asyncHandler(async (req, res) => {
     log('info', responseLog);
 
     ok(res, stats);
+});
+
+/**
+ * [DELETE] /cameras/:id
+ * 카메라 삭제
+ */
+exports.deleteCamera = asyncHandler(async (req, res) => {
+    const requestLog = createRequestLog(req, 'DELETE_CAMERA');
+    log('info', requestLog);
+
+    const { id } = req.params;
+    const userId = req.user.userId;
+
+    // 카메라 ID 검증
+    if (!id || isNaN(parseInt(id))) {
+        const errorLog = createResponseLog(res, 400, '유효하지 않은 카메라 ID');
+        log('error', errorLog);
+        return err(res, errors.INVALID_INPUT, '유효하지 않은 카메라 ID입니다.');
+    }
+
+    // 카메라 존재 여부 확인
+    const existingCamera = await cameraService.getCameraById(parseInt(id), userId);
+    if (!existingCamera) {
+        const errorLog = createResponseLog(res, 404, '카메라를 찾을 수 없음');
+        log('error', errorLog);
+        return err(res, errors.NOT_FOUND, '삭제할 카메라를 찾을 수 없습니다.');
+    }
+
+    // 카메라 삭제
+    const deletedCamera = await cameraService.deleteCameraById(parseInt(id), userId);
+
+    const responseLog = createResponseLog(res, 200, '카메라 삭제 성공');
+    log('info', responseLog);
+
+    ok(res, { 
+        deletedCamera,
+        message: `'${existingCamera.name}' 카메라가 성공적으로 삭제되었습니다.`
+    });
 });

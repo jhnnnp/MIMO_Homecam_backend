@@ -30,6 +30,26 @@ async function getCamerasByUserId(userId) {
 }
 
 /**
+ * 설명: 사용자의 등록된 카메라 수 조회
+ * 입력: userId
+ * 출력: 카메라 수 (number)
+ * 부작용: DB 조회
+ * 예외: throw codes E_DATABASE_ERROR
+ */
+async function getCameraCountByUserId(userId) {
+    try {
+        const count = await Camera.count({
+            where: { user_id: userId }
+        });
+
+        return count;
+    } catch (error) {
+        console.error('카메라 수 조회 실패:', error);
+        throw new Error('카메라 수를 조회할 수 없습니다.');
+    }
+}
+
+/**
  * 설명: 특정 카메라 상세 정보 조회
  * 입력: cameraId, userId
  * 출력: 카메라 정보
@@ -168,12 +188,31 @@ async function deleteCamera(cameraId, userId) {
             throw new Error('카메라를 찾을 수 없습니다.');
         }
 
+        // 삭제하기 전에 카메라 정보 저장
+        const deletedCameraInfo = {
+            id: camera.id,
+            name: camera.name,
+            device_id: camera.device_id,
+            location: camera.location
+        };
+
         await camera.destroy();
-        return true;
+        return deletedCameraInfo;
     } catch (error) {
         console.error('카메라 삭제 실패:', error);
         throw error;
     }
+}
+
+/**
+ * 설명: ID로 카메라 삭제 (컨트롤러용)
+ * 입력: cameraId, userId
+ * 출력: 삭제된 카메라 정보
+ * 부작용: DB 삭제
+ * 예외: throw codes E_NOT_FOUND, E_DATABASE_ERROR
+ */
+async function deleteCameraById(cameraId, userId) {
+    return await deleteCamera(cameraId, userId);
 }
 
 /**
@@ -293,10 +332,12 @@ async function cleanupOfflineCameras() {
 
 module.exports = {
     getCamerasByUserId,
+    getCameraCountByUserId,
     getCameraById,
     createCamera,
     updateCamera,
     deleteCamera,
+    deleteCameraById,
     updateCameraStatus,
     getCameraStats,
     cleanupOfflineCameras,
