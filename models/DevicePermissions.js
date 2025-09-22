@@ -56,3 +56,9 @@ const DevicePermissions = sequelize.define('DevicePermissions', {
 });
 
 module.exports = DevicePermissions;
+
+
+
+
+
+

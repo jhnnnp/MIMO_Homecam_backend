@@ -2,7 +2,7 @@
 
 /** @type {import('sequelize-cli').Migration} */
 module.exports = {
-  async up (queryInterface, Sequelize) {
+  async up(queryInterface, Sequelize) {
     // 1. UserSettings 테이블 생성 (고정 스키마)
     await queryInterface.createTable('UserSettings', {
       id: {
@@ -125,8 +125,8 @@ module.exports = {
     );
 
     // 고정 설정 필드들
-    const fixedSettings = ['notification_enabled', 'motion_sensitivity', 'auto_recording', 
-                          'recording_quality', 'storage_days', 'dark_mode', 'language', 'timezone'];
+    const fixedSettings = ['notification_enabled', 'motion_sensitivity', 'auto_recording',
+      'recording_quality', 'storage_days', 'dark_mode', 'language', 'timezone'];
 
     // 사용자별로 그룹화
     const userSettings = {};
@@ -180,10 +180,10 @@ module.exports = {
     await queryInterface.renameTable('Settings', 'Settings_backup');
   },
 
-  async down (queryInterface, Sequelize) {
+  async down(queryInterface, Sequelize) {
     // 백업에서 원본 Settings 테이블 복원
     await queryInterface.renameTable('Settings_backup', 'Settings');
-    
+
     // 새로 생성한 테이블들 제거
     await queryInterface.dropTable('UserCustomSettings');
     await queryInterface.dropTable('UserSettings');
