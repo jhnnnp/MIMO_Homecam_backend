@@ -1,320 +1,197 @@
 // SettingsController.js
 const settingsService = require('../service/SettingsService');
+const { User } = require('../models');
+
+// 유틸리티 import
+const { ok, err, errors } = require('../utils/responseHelpers');
+const asyncHandler = require('../utils/asyncHandler');
+const { createRequestLog, createResponseLog, log } = require('../utils/logger');
 
 /**
- * 설명: 사용자 설정 조회
- * 입력: req.user.userId
- * 출력: 설정 정보 JSON
- * 부작용: 없음
- * 예외: 500 에러
+ * [GET] /settings
+ * 사용자의 모든 설정 조회 (고정 + 커스텀)
  */
-exports.getSettings = async (req, res) => {
-    try {
-        const settings = await settingsService.getSettingsByUserId(req.user.userId);
+exports.getSettings = asyncHandler(async (req, res) => {
+    const requestLog = createRequestLog(req, 'GET_USER_SETTINGS');
+    log('info', requestLog);
 
-        res.json({
-            ok: true,
-            data: { settings }
-        });
-    } catch (error) {
-        console.error('설정 조회 에러:', error.message);
-        res.status(500).json({
-            ok: false,
-            error: {
-                code: 'E_DATABASE_ERROR',
-                message: '설정을 조회할 수 없습니다.'
-            }
-        });
+    const settings = await settingsService.getAllUserSettings(req.user.userId);
+
+    const responseLog = createResponseLog(res, 200, '사용자 설정 조회 성공');
+    log('info', responseLog);
+
+    ok(res, { settings });
+});
+
+/**
+ * [GET] /settings/core
+ * 사용자의 핵심 설정만 조회 (UserSettings 테이블)
+ */
+exports.getCoreSettings = asyncHandler(async (req, res) => {
+    const requestLog = createRequestLog(req, 'GET_CORE_SETTINGS');
+    log('info', requestLog);
+
+    const coreSettings = await settingsService.getCoreSettings(req.user.userId);
+
+    const responseLog = createResponseLog(res, 200, '핵심 설정 조회 성공');
+    log('info', responseLog);
+
+    ok(res, { coreSettings });
+});
+
+/**
+ * [GET] /settings/custom
+ * 사용자의 커스텀 설정만 조회 (UserCustomSettings 테이블)
+ */
+exports.getCustomSettings = asyncHandler(async (req, res) => {
+    const requestLog = createRequestLog(req, 'GET_CUSTOM_SETTINGS');
+    log('info', requestLog);
+
+    const customSettings = await settingsService.getCustomSettings(req.user.userId);
+
+    const responseLog = createResponseLog(res, 200, '커스텀 설정 조회 성공');
+    log('info', responseLog);
+
+    ok(res, { customSettings });
+});
+
+/**
+ * [PUT] /settings/core
+ * 핵심 설정 업데이트 (UserSettings 테이블)
+ */
+exports.updateCoreSettings = asyncHandler(async (req, res) => {
+    const requestLog = createRequestLog(req, 'UPDATE_CORE_SETTINGS');
+    log('info', requestLog);
+
+    const updateData = req.body;
+    const userId = req.user.userId;
+
+    // 입력 검증
+    const allowedFields = [
+        'notification_enabled', 'motion_sensitivity', 'auto_recording',
+        'recording_quality', 'storage_days', 'dark_mode', 'language', 'timezone'
+    ];
+
+    const invalidFields = Object.keys(updateData).filter(field => !allowedFields.includes(field));
+    if (invalidFields.length > 0) {
+        return err(res, errors.INVALID_INPUT, `유효하지 않은 필드: ${invalidFields.join(', ')}`);
     }
-};
 
-/**
- * 설명: 사용자 설정 업데이트
- * 입력: req.body, req.user.userId
- * 출력: 업데이트된 설정 정보 JSON
- * 부작용: DB 업데이트
- * 예외: 400, 500 에러
- */
-exports.updateSettings = async (req, res) => {
-    try {
-        const updateData = req.body;
-
-        // 설정 데이터 검증
-        await settingsService.validateSettings(updateData);
-
-        const settings = await settingsService.updateSettings(req.user.userId, updateData);
-
-        res.json({
-            ok: true,
-            data: { settings },
-            message: '설정이 성공적으로 업데이트되었습니다.'
-        });
-    } catch (error) {
-        console.error('설정 업데이트 에러:', error.message);
-
-        if (error.message.includes('설정 검증 실패')) {
-            res.status(400).json({
-                ok: false,
-                error: {
-                    code: 'E_VALIDATION',
-                    message: error.message
-                }
-            });
-        } else {
-            res.status(500).json({
-                ok: false,
-                error: {
-                    code: 'E_DATABASE_ERROR',
-                    message: '설정을 업데이트할 수 없습니다.'
-                }
-            });
+    // 엔터프라이즈: 구독 등급에 따라 최대 화질 제한
+    if (updateData && updateData.recording_quality) {
+        const user = await User.findByPk(userId);
+        const tier = user?.subscription_tier || 'free';
+        const maxByTier = { free: '720p', pro: '1080p', premium: '4K' };
+        const order = ['480p', '720p', '1080p', '4K'];
+        const desired = updateData.recording_quality;
+        const maxAllowed = maxByTier[tier] || '720p';
+        if (order.indexOf(desired) > order.indexOf(maxAllowed)) {
+            return err(res, errors.FORBIDDEN, `현재 구독 등급(${tier})에서는 ${maxAllowed} 까지만 설정 가능합니다.`);
         }
     }
-};
+
+    const updatedSettings = await settingsService.updateCoreSettings(userId, updateData);
+
+    const responseLog = createResponseLog(res, 200, '핵심 설정 업데이트 성공');
+    log('info', responseLog);
+
+    ok(res, {
+        coreSettings: updatedSettings,
+        message: '핵심 설정이 성공적으로 업데이트되었습니다.'
+    });
+});
 
 /**
- * 설명: 특정 설정 값 조회
- * 입력: req.params.key, req.user.userId
- * 출력: 설정 값 JSON
- * 부작용: 없음
- * 예외: 500 에러
+ * [PUT] /settings/custom/:key
+ * 특정 커스텀 설정 업데이트
  */
-exports.getSettingValue = async (req, res) => {
-    try {
-        const { key } = req.params;
-        const value = await settingsService.getSettingValue(req.user.userId, key);
+exports.updateCustomSetting = asyncHandler(async (req, res) => {
+    const requestLog = createRequestLog(req, 'UPDATE_CUSTOM_SETTING');
+    log('info', requestLog);
 
-        res.json({
-            ok: true,
-            data: { key, value }
-        });
-    } catch (error) {
-        console.error('설정 값 조회 에러:', error.message);
-        res.status(500).json({
-            ok: false,
-            error: {
-                code: 'E_DATABASE_ERROR',
-                message: '설정 값을 조회할 수 없습니다.'
-            }
-        });
+    const { key } = req.params;
+    const { value, dataType } = req.body;
+    const userId = req.user.userId;
+
+    // 입력 검증
+    if (!key) {
+        return err(res, errors.INVALID_INPUT, '설정 키가 필요합니다.');
     }
-};
+
+    if (value === undefined) {
+        return err(res, errors.INVALID_INPUT, '설정 값이 필요합니다.');
+    }
+
+    const allowedDataTypes = ['string', 'number', 'boolean', 'json'];
+    if (dataType && !allowedDataTypes.includes(dataType)) {
+        return err(res, errors.INVALID_INPUT, '유효하지 않은 데이터 타입입니다.');
+    }
+
+    const updatedSetting = await settingsService.updateCustomSetting(
+        userId,
+        key,
+        value,
+        dataType || 'string'
+    );
+
+    const responseLog = createResponseLog(res, 200, '커스텀 설정 업데이트 성공');
+    log('info', responseLog);
+
+    ok(res, {
+        customSetting: updatedSetting,
+        message: `'${key}' 설정이 성공적으로 업데이트되었습니다.`
+    });
+});
 
 /**
- * 설명: 특정 설정 값 업데이트
- * 입력: req.params.key, req.body.value, req.user.userId
- * 출력: 업데이트된 설정 정보 JSON
- * 부작용: DB 업데이트
- * 예외: 400, 500 에러
+ * [DELETE] /settings/custom/:key
+ * 특정 커스텀 설정 삭제
  */
-exports.updateSettingValue = async (req, res) => {
-    try {
-        const { key } = req.params;
-        const { value } = req.body;
+exports.deleteCustomSetting = asyncHandler(async (req, res) => {
+    const requestLog = createRequestLog(req, 'DELETE_CUSTOM_SETTING');
+    log('info', requestLog);
 
-        const settings = await settingsService.updateSettingValue(req.user.userId, key, value);
+    const { key } = req.params;
+    const userId = req.user.userId;
 
-        res.json({
-            ok: true,
-            data: { settings },
-            message: '설정 값이 성공적으로 업데이트되었습니다.'
-        });
-    } catch (error) {
-        console.error('설정 값 업데이트 에러:', error.message);
-        res.status(500).json({
-            ok: false,
-            error: {
-                code: 'E_DATABASE_ERROR',
-                message: '설정 값을 업데이트할 수 없습니다.'
-            }
-        });
+    // 입력 검증
+    if (!key) {
+        return err(res, errors.INVALID_INPUT, '설정 키가 필요합니다.');
     }
-};
+
+    const result = await settingsService.deleteCustomSetting(userId, key);
+
+    const responseLog = createResponseLog(res, 200, '커스텀 설정 삭제 성공');
+    log('info', responseLog);
+
+    ok(res, {
+        deleted: result,
+        message: `'${key}' 설정이 성공적으로 삭제되었습니다.`
+    });
+});
 
 /**
- * 설명: 설정 초기화 (기본값으로 복원)
- * 입력: req.user.userId
- * 출력: 초기화된 설정 정보 JSON
- * 부작용: DB 업데이트
- * 예외: 500 에러
+ * [POST] /settings/reset
+ * 사용자 설정을 기본값으로 초기화
  */
-exports.resetSettings = async (req, res) => {
-    try {
-        const settings = await settingsService.resetSettings(req.user.userId);
+exports.resetSettings = asyncHandler(async (req, res) => {
+    const requestLog = createRequestLog(req, 'RESET_USER_SETTINGS');
+    log('info', requestLog);
 
-        res.json({
-            ok: true,
-            data: { settings },
-            message: '설정이 기본값으로 초기화되었습니다.'
-        });
-    } catch (error) {
-        console.error('설정 초기화 에러:', error.message);
-        res.status(500).json({
-            ok: false,
-            error: {
-                code: 'E_DATABASE_ERROR',
-                message: '설정을 초기화할 수 없습니다.'
-            }
-        });
+    const userId = req.user.userId;
+    const { resetType } = req.body; // 'core', 'custom', 'all'
+
+    if (!['core', 'custom', 'all'].includes(resetType)) {
+        return err(res, errors.INVALID_INPUT, '유효하지 않은 초기화 타입입니다.');
     }
-};
 
-/**
- * 설명: 카메라별 설정 조회
- * 입력: req.params.cameraId, req.user.userId
- * 출력: 카메라별 설정 정보 JSON
- * 부작용: 없음
- * 예외: 403, 500 에러
- */
-exports.getCameraSettings = async (req, res) => {
-    try {
-        const { cameraId } = req.params;
-        const cameraSettings = await settingsService.getCameraSettings(req.user.userId, cameraId);
+    const result = await settingsService.resetUserSettings(userId, resetType);
 
-        res.json({
-            ok: true,
-            data: { cameraSettings }
-        });
-    } catch (error) {
-        console.error('카메라 설정 조회 에러:', error.message);
+    const responseLog = createResponseLog(res, 200, '설정 초기화 성공');
+    log('info', responseLog);
 
-        if (error.message === '카메라에 접근 권한이 없습니다.') {
-            res.status(403).json({
-                ok: false,
-                error: {
-                    code: 'E_FORBIDDEN',
-                    message: '카메라에 접근 권한이 없습니다.'
-                }
-            });
-        } else {
-            res.status(500).json({
-                ok: false,
-                error: {
-                    code: 'E_DATABASE_ERROR',
-                    message: '카메라 설정을 조회할 수 없습니다.'
-                }
-            });
-        }
-    }
-};
-
-/**
- * 설명: 카메라별 설정 업데이트
- * 입력: req.params.cameraId, req.body, req.user.userId
- * 출력: 업데이트된 카메라별 설정 정보 JSON
- * 부작용: DB 업데이트
- * 예외: 400, 403, 500 에러
- */
-exports.updateCameraSettings = async (req, res) => {
-    try {
-        const { cameraId } = req.params;
-        const updateData = req.body;
-
-        // 설정 데이터 검증
-        await settingsService.validateSettings(updateData);
-
-        const cameraSettings = await settingsService.updateCameraSettings(req.user.userId, cameraId, updateData);
-
-        res.json({
-            ok: true,
-            data: { cameraSettings },
-            message: '카메라 설정이 성공적으로 업데이트되었습니다.'
-        });
-    } catch (error) {
-        console.error('카메라 설정 업데이트 에러:', error.message);
-
-        if (error.message.includes('설정 검증 실패')) {
-            res.status(400).json({
-                ok: false,
-                error: {
-                    code: 'E_VALIDATION',
-                    message: error.message
-                }
-            });
-        } else if (error.message === '카메라에 접근 권한이 없습니다.') {
-            res.status(403).json({
-                ok: false,
-                error: {
-                    code: 'E_FORBIDDEN',
-                    message: '카메라에 접근 권한이 없습니다.'
-                }
-            });
-        } else {
-            res.status(500).json({
-                ok: false,
-                error: {
-                    code: 'E_DATABASE_ERROR',
-                    message: '카메라 설정을 업데이트할 수 없습니다.'
-                }
-            });
-        }
-    }
-};
-
-/**
- * 설명: 설정 내보내기 (백업용)
- * 입력: req.user.userId
- * 출력: 설정 JSON
- * 부작용: 없음
- * 예외: 500 에러
- */
-exports.exportSettings = async (req, res) => {
-    try {
-        const exportedData = await settingsService.exportSettings(req.user.userId);
-
-        res.json({
-            ok: true,
-            data: { exportedData }
-        });
-    } catch (error) {
-        console.error('설정 내보내기 에러:', error.message);
-        res.status(500).json({
-            ok: false,
-            error: {
-                code: 'E_DATABASE_ERROR',
-                message: '설정을 내보낼 수 없습니다.'
-            }
-        });
-    }
-};
-
-/**
- * 설명: 설정 가져오기 (복원용)
- * 입력: req.body.settingsData, req.user.userId
- * 출력: 가져온 설정 정보 JSON
- * 부작용: DB 업데이트
- * 예외: 400, 500 에러
- */
-exports.importSettings = async (req, res) => {
-    try {
-        const { settingsData } = req.body;
-
-        const importedData = await settingsService.importSettings(req.user.userId, settingsData);
-
-        res.json({
-            ok: true,
-            data: { importedData },
-            message: '설정이 성공적으로 가져와졌습니다.'
-        });
-    } catch (error) {
-        console.error('설정 가져오기 에러:', error.message);
-
-        if (error.message.includes('설정 검증 실패')) {
-            res.status(400).json({
-                ok: false,
-                error: {
-                    code: 'E_VALIDATION',
-                    message: error.message
-                }
-            });
-        } else {
-            res.status(500).json({
-                ok: false,
-                error: {
-                    code: 'E_DATABASE_ERROR',
-                    message: '설정을 가져올 수 없습니다.'
-                }
-            });
-        }
-    }
-};
+    ok(res, {
+        result,
+        message: `${resetType === 'all' ? '모든' : resetType === 'core' ? '핵심' : '커스텀'} 설정이 초기화되었습니다.`
+    });
+});

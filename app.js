@@ -215,6 +215,7 @@ app.use('/api/notifications', require('./routes/notificationRouter'));
 app.use('/api/qr', require('./routes/qrRouter'));
 app.use('/api/connections', require('./routes/connectionRouter'));
 app.use('/api/streaming', require('./routes/streamingRouter'));
+app.use('/api/health', require('./routes/healthRouter'));
 
 
 // Google OAuth 콜백을 위한 직접 라우트 추가

@@ -364,4 +364,11 @@ class MediaServer {
     }
 }
 
-module.exports = MediaServer; 
+module.exports = MediaServer;
+
+// 직접 실행 지원 (CLI)
+if (require.main === module) {
+    const port = parseInt(process.argv[2] || process.env.MEDIA_SERVER_PORT || '4002', 10);
+    const server = new MediaServer(port);
+    server.start();
+}
