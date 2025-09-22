@@ -15,6 +15,9 @@ class WebSocketServer {
         this.clients = new Map(); // userId -> WebSocket
         this.subscriptions = new Map(); // cameraId -> Set<userId>
         this.userSubscriptions = new Map(); // userId -> Set<cameraId>
+        // 카메라 소유자 및 뷰어 추적
+        this.cameraOwners = new Map(); // cameraId -> ownerUserId
+        this.cameraViewers = new Map(); // cameraId -> Set<viewerUserId>
         this.setupWebSocket();
     }
 
@@ -104,6 +107,30 @@ class WebSocketServer {
             console.log(`WebSocket client disconnected: ${user.email} (${user.id}) - ${code}: ${reason}`);
             this.clients.delete(user.id);
             this.cleanupUserSubscriptions(user.id);
+            // 뷰어 연결 정리 및 카메라 소유자에게 알림
+            try {
+                // 모든 카메라에서 해당 뷰어 제거
+                for (const [cameraId, viewers] of this.cameraViewers.entries()) {
+                    if (viewers.has(user.id)) {
+                        viewers.delete(user.id);
+                        // 소유자에게 뷰어 퇴장 알림
+                        const ownerId = this.cameraOwners.get(cameraId);
+                        if (ownerId) {
+                            this.sendToUser(ownerId, {
+                                type: 'viewer_left',
+                                data: { cameraId, viewerId: user.id }
+                            });
+                            // 뷰어 수 업데이트도 같이 전송
+                            this.sendToUser(ownerId, {
+                                type: 'viewer_count_update',
+                                data: { connectionId: cameraId, viewerCount: viewers.size }
+                            });
+                        }
+                    }
+                }
+            } catch (e) {
+                console.warn('Viewer cleanup on close failed:', e);
+            }
         });
 
         ws.on('error', (error) => {
@@ -145,12 +172,46 @@ class WebSocketServer {
                 this.handleCameraUnsubscription(user.id, data);
                 break;
 
+            // 스트리밍 관련 메시지 타입 추가
+            case 'webrtc_signaling':
+                // WebRTC 시그널링 메시지 처리
+                this.handleWebRTCSignaling(user.id, data);
+                break;
+
+            case 'register_camera':
+                // 카메라 등록
+                this.handleCameraRegistration(user.id, data);
+                break;
+
+            case 'unregister_camera':
+                // 카메라 등록 해제
+                this.handleCameraUnregistration(user.id, data);
+                break;
+
+            case 'start_stream':
+                // 스트림 시작
+                this.handleStreamStart(user.id, data);
+                break;
+
+            case 'stop_stream':
+                // 스트림 중지
+                this.handleStreamStop(user.id, data);
+                break;
+
+            case 'join_stream':
+                // 스트림 참여
+                this.handleStreamJoin(user.id, data);
+                break;
+
+            case 'leave_stream':
+                // 스트림 떠나기
+                this.handleStreamLeave(user.id, data);
+                break;
+
             default:
-                console.log(`Unknown message type from user ${user.id}:`, type);
-                this.sendToUser(user.id, {
-                    type: 'error',
-                    data: { message: 'Unknown message type' }
-                });
+                console.log(`⚠️ [WebSocket] 처리되지 않은 메시지 타입 - 사용자: ${user.id}, 타입: ${type}`);
+                // 에러 응답 대신 경고 로그만 출력 (개발 중이므로)
+                console.warn('Unhandled message type:', { userId: user.id, type, data });
         }
     }
 
@@ -552,6 +613,161 @@ class WebSocketServer {
             userIds.forEach(userId => this.sendToUser(userId, message));
         } else {
             this.broadcast(message);
+        }
+    }
+
+    /**
+     * WebRTC 시그널링 메시지 처리
+     */
+    handleWebRTCSignaling(userId, data) {
+        console.log(`📡 [WebRTC] 시그널링 메시지 처리 - 사용자: ${userId}`);
+        // WebRTC 시그널링 로직 구현 필요
+        // 현재는 로그만 출력
+    }
+
+    /**
+     * 카메라 등록 처리
+     */
+    handleCameraRegistration(userId, data) {
+        console.log(`📹 [Camera] 카메라 등록 - 사용자: ${userId}, 데이터:`, data);
+        // 카메라 소유자 매핑 및 뷰어 세트 초기화
+        try {
+            const cameraId = data && (data.id || data.cameraId);
+            if (cameraId) {
+                this.cameraOwners.set(String(cameraId), userId);
+                if (!this.cameraViewers.has(String(cameraId))) {
+                    this.cameraViewers.set(String(cameraId), new Set());
+                }
+                // 소유자에게 카메라 연결 알림
+                this.sendToUser(userId, {
+                    type: 'camera_connected',
+                    data: { cameraId: String(cameraId) }
+                });
+            }
+        } catch (e) {
+            console.warn('Failed to map camera owner:', e);
+        }
+        this.sendToUser(userId, {
+            type: 'camera_registered',
+            data: { success: true, cameraId: data.id }
+        });
+    }
+
+    /**
+     * 카메라 등록 해제 처리
+     */
+    handleCameraUnregistration(userId, data) {
+        console.log(`📹 [Camera] 카메라 등록 해제 - 사용자: ${userId}, 데이터:`, data);
+        // 카메라 등록 해제 로직 구현 필요
+        this.sendToUser(userId, {
+            type: 'camera_unregistered',
+            data: { success: true, cameraId: data.id }
+        });
+    }
+
+    /**
+     * 스트림 시작 처리
+     */
+    handleStreamStart(userId, data) {
+        console.log(`🎥 [Stream] 스트림 시작 - 사용자: ${userId}, 데이터:`, data);
+        // 스트림 시작 로직 구현 필요
+        this.sendToUser(userId, {
+            type: 'stream_started',
+            data: { success: true, cameraId: data.cameraId }
+        });
+    }
+
+    /**
+     * 스트림 중지 처리
+     */
+    handleStreamStop(userId, data) {
+        console.log(`🛑 [Stream] 스트림 중지 - 사용자: ${userId}, 데이터:`, data);
+        // 스트림 중지 로직 구현 필요
+        this.sendToUser(userId, {
+            type: 'stream_stopped',
+            data: { success: true, cameraId: data.cameraId }
+        });
+    }
+
+    /**
+     * 스트림 참여 처리
+     */
+    handleStreamJoin(userId, data) {
+        console.log(`👥 [Stream] 스트림 참여 - 사용자: ${userId}, 데이터:`, data);
+        try {
+            const cameraId = data && String(data.cameraId);
+            const viewerId = data && String(data.viewerId || userId);
+
+            if (!cameraId) {
+                this.sendToUser(userId, { type: 'error', data: { message: 'cameraId is required' } });
+                return;
+            }
+
+            // 뷰어 세트에 추가
+            if (!this.cameraViewers.has(cameraId)) {
+                this.cameraViewers.set(cameraId, new Set());
+            }
+            const viewers = this.cameraViewers.get(cameraId);
+            viewers.add(viewerId);
+
+            // 뷰어에게 참여 확인
+            this.sendToUser(userId, {
+                type: 'stream_joined',
+                data: { success: true, cameraId, viewerId }
+            });
+
+            // 카메라 소유자에게 뷰어 참여 알림
+            const ownerId = this.cameraOwners.get(cameraId);
+            if (ownerId) {
+                this.sendToUser(ownerId, {
+                    type: 'viewer_joined',
+                    data: { streamId: cameraId, cameraId, viewerId }
+                });
+                // 뷰어 수 업데이트도 전송
+                this.sendToUser(ownerId, {
+                    type: 'viewer_count_update',
+                    data: { connectionId: cameraId, viewerCount: viewers.size }
+                });
+            }
+        } catch (e) {
+            console.error('handleStreamJoin error:', e);
+        }
+    }
+
+    /**
+     * 스트림 떠나기 처리
+     */
+    handleStreamLeave(userId, data) {
+        console.log(`🚪 [Stream] 스트림 떠나기 - 사용자: ${userId}, 데이터:`, data);
+        try {
+            const cameraId = data && String(data.cameraId);
+            const viewerId = data && String(data.viewerId || userId);
+
+            if (cameraId && this.cameraViewers.has(cameraId)) {
+                const viewers = this.cameraViewers.get(cameraId);
+                viewers.delete(viewerId);
+
+                // 소유자에게 뷰어 퇴장 알림 및 카운트 업데이트
+                const ownerId = this.cameraOwners.get(cameraId);
+                if (ownerId) {
+                    this.sendToUser(ownerId, {
+                        type: 'viewer_left',
+                        data: { cameraId, viewerId }
+                    });
+                    this.sendToUser(ownerId, {
+                        type: 'viewer_count_update',
+                        data: { connectionId: cameraId, viewerCount: viewers.size }
+                    });
+                }
+            }
+
+            // 요청 사용자에게도 확인 응답
+            this.sendToUser(userId, {
+                type: 'stream_left',
+                data: { success: true, cameraId }
+            });
+        } catch (e) {
+            console.error('handleStreamLeave error:', e);
         }
     }
 }

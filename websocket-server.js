@@ -328,21 +328,44 @@ class MIMOStreamingServer {
     handleWebRTCSignaling(clientId, data) {
         const { from, to, type, data: signalData } = data;
 
-        // 특정 클라이언트에게 시그널링 메시지 전달
-        const targetClient = this.findClientById(to);
-        if (targetClient) {
-            this.sendToClient(targetClient.id, {
-                type: 'webrtc_signaling',
-                data: {
-                    from,
-                    to,
-                    type,
-                    data: signalData
+        // 우선순위:
+        // 1) 내부 clientId 직접 지정
+        // 2) cameraId 매핑 (카메라 소켓)
+        // 3) viewerId 매핑 (뷰어 소켓)
+        let targetClientId = null;
+
+        // 1) 내부 clientId 확인
+        const direct = this.findClientById(to);
+        if (direct) {
+            targetClientId = direct.id;
+        }
+
+        // 2) cameraId → clientId 매핑
+        if (!targetClientId) {
+            const camera = this.cameras.get(to);
+            if (camera && camera.clientId) {
+                targetClientId = camera.clientId;
+            }
+        }
+
+        // 3) viewerId → clientId 매핑
+        if (!targetClientId) {
+            for (const [cid, client] of this.clients.entries()) {
+                if (client.type === 'viewer' && client.data?.viewerId === to) {
+                    targetClientId = cid;
+                    break;
                 }
+            }
+        }
+
+        if (targetClientId) {
+            this.sendToClient(targetClientId, {
+                type: 'webrtc_signaling',
+                data: { from, to, type, data: signalData }
             });
-            console.log(`📡 WebRTC 시그널링: ${from} -> ${to} (${type})`);
+            console.log(`📡 WebRTC 시그널링 전달: ${from} -> ${to} (${type})`);
         } else {
-            console.warn(`⚠️ 대상 클라이언트를 찾을 수 없음: ${to}`);
+            console.warn(`⚠️ 시그널링 대상 매핑 실패 (to='${to}')`);
         }
     }
 
