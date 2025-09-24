@@ -74,6 +74,10 @@ class MediaServer {
 
             // 토큰 검증
             if (!verifyHmacSignature({ type, cameraId, viewerId, ts, token })) {
+                console.warn('⚠️ 토큰 검증 실패 또는 만료. 연결 거절:', { type, cameraId, viewerId, ts });
+                try {
+                    ws.send(JSON.stringify({ type: 'error', data: { code: 'INVALID_TOKEN', message: 'Invalid or expired token' } }));
+                } catch (_) { }
                 ws.close(1008, 'Invalid or expired token');
                 return;
             }
@@ -149,39 +153,40 @@ class MediaServer {
     handleViewer(ws, cameraId) {
         console.log(`👁️ 뷰어가 카메라 ${cameraId} 스트림에 연결`);
 
-        const stream = this.streams.get(cameraId);
-        if (!stream) {
-            ws.close(1008, 'Stream not available');
-            return;
+        // 뷰어 세트가 없으면 먼저 생성 (퍼블리셔보다 먼저 들어올 수 있음)
+        if (!this.viewers.has(cameraId)) {
+            this.viewers.set(cameraId, new Set());
         }
 
-        // 뷰어 등록
         const viewers = this.viewers.get(cameraId);
-        if (viewers) {
-            viewers.add(ws);
+        viewers.add(ws);
+
+        const stream = this.streams.get(cameraId);
+        if (stream) {
             stream.viewers = viewers.size;
         }
 
-        // 스트림 정보 전송
+        // 스트림 정보(또는 대기 상태) 전송
         ws.send(JSON.stringify({
             type: 'stream_info',
             data: {
                 cameraId,
-                status: stream.status,
-                viewers: stream.viewers,
-                startTime: stream.startTime,
-                meta: stream.meta
+                status: stream ? stream.status : 'waiting',
+                viewers: stream ? stream.viewers : viewers.size,
+                startTime: stream ? stream.startTime : null,
+                meta: stream ? stream.meta : null
             }
         }));
 
-        ws.on('close', () => {
-            console.log(`👁️ 뷰어가 카메라 ${cameraId} 스트림에서 연결 해제`);
-            const viewers = this.viewers.get(cameraId);
-            if (viewers) {
-                viewers.delete(ws);
-                const stream = this.streams.get(cameraId);
-                if (stream) {
-                    stream.viewers = viewers.size;
+        // idle timeout 방지: 오류가 없는 한 서버가 먼저 닫지 않음
+        ws.on('close', (code, reason) => {
+            console.log(`👁️ 뷰어가 카메라 ${cameraId} 스트림에서 연결 해제`, { code, reason: reason?.toString?.() });
+            const current = this.viewers.get(cameraId);
+            if (current) {
+                current.delete(ws);
+                const s = this.streams.get(cameraId);
+                if (s) {
+                    s.viewers = current.size;
                 }
             }
         });
