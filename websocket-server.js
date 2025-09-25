@@ -11,7 +11,7 @@ class MIMOStreamingServer {
         this.clients = new Map(); // clientId -> { type, data, ws }
 
         // 카메라 정보
-        this.cameras = new Map(); // cameraId -> { name, status, viewers, clientId }
+        this.cameras = new Map(); // cameraId -> { name, status, viewers(Set|string[]), clientId }
 
         // 활성 스트림
         this.activeStreams = new Map(); // streamId -> { cameraId, viewers }
@@ -142,7 +142,7 @@ class MIMOStreamingServer {
         this.cameras.set(id, {
             name,
             status: 'online',
-            viewers: [],
+            viewers: new Set(),
             clientId
         });
 
@@ -170,7 +170,8 @@ class MIMOStreamingServer {
 
         if (camera) {
             // 연결된 모든 뷰어에게 카메라 연결 해제 알림
-            camera.viewers.forEach(viewerId => {
+            const viewers = camera.viewers instanceof Set ? Array.from(camera.viewers) : camera.viewers;
+            viewers.forEach(viewerId => {
                 this.sendToViewer(viewerId, {
                     type: 'camera_disconnected',
                     data: { cameraId: id, reason: 'camera_offline' }
@@ -273,19 +274,30 @@ class MIMOStreamingServer {
             return;
         }
 
-        // 뷰어를 카메라에 추가
-        if (!camera.viewers.includes(viewerId)) {
+        // 뷰어를 카메라에 추가 (중복 방지)
+        const beforeSize = camera.viewers instanceof Set ? camera.viewers.size : camera.viewers.length;
+        if (camera.viewers instanceof Set) {
+            camera.viewers.add(viewerId);
+        } else if (!camera.viewers.includes(viewerId)) {
             camera.viewers.push(viewerId);
         }
+        const afterSize = camera.viewers instanceof Set ? camera.viewers.size : camera.viewers.length;
+        const isNewViewer = afterSize > beforeSize;
 
         this.clients.get(clientId).type = 'viewer';
         this.clients.get(clientId).data = { viewerId, cameraId };
 
-        // 뷰어 참여 알림 (모든 클라이언트에게)
-        this.broadcast({
-            type: 'viewer_joined',
-            data: { cameraId, viewerId }
-        });
+        // 뷰어 신규 참여 시에만 알림 및 카운트 업데이트 브로드캐스트
+        if (isNewViewer) {
+            this.broadcast({
+                type: 'viewer_joined',
+                data: { cameraId, viewerId }
+            });
+            this.broadcast({
+                type: 'viewer_count_update',
+                data: { connectionId: cameraId, viewerCount: afterSize }
+            });
+        }
 
         // 카메라에게 뷰어 참여 알림
         this.sendToCamera(cameraId, {
@@ -307,7 +319,11 @@ class MIMOStreamingServer {
         const camera = this.cameras.get(cameraId);
 
         if (camera) {
-            camera.viewers = camera.viewers.filter(id => id !== viewerId);
+            if (camera.viewers instanceof Set) {
+                camera.viewers.delete(viewerId);
+            } else {
+                camera.viewers = camera.viewers.filter(id => id !== viewerId);
+            }
 
             // 뷰어 퇴장 알림 (모든 클라이언트에게)
             this.broadcast({
@@ -321,6 +337,13 @@ class MIMOStreamingServer {
                 data: { cameraId, viewerId }
             });
 
+            // 뷰어 수 갱신 브로드캐스트
+            const count = camera.viewers instanceof Set ? camera.viewers.size : camera.viewers.length;
+            this.broadcast({
+                type: 'viewer_count_update',
+                data: { connectionId: cameraId, viewerCount: count }
+            });
+
             console.log(`👁️ 뷰어 퇴장: ${viewerId} <- ${camera.name}`);
         }
     }
@@ -328,21 +351,44 @@ class MIMOStreamingServer {
     handleWebRTCSignaling(clientId, data) {
         const { from, to, type, data: signalData } = data;
 
-        // 특정 클라이언트에게 시그널링 메시지 전달
-        const targetClient = this.findClientById(to);
-        if (targetClient) {
-            this.sendToClient(targetClient.id, {
-                type: 'webrtc_signaling',
-                data: {
-                    from,
-                    to,
-                    type,
-                    data: signalData
+        // 우선순위:
+        // 1) 내부 clientId 직접 지정
+        // 2) cameraId 매핑 (카메라 소켓)
+        // 3) viewerId 매핑 (뷰어 소켓)
+        let targetClientId = null;
+
+        // 1) 내부 clientId 확인
+        const direct = this.findClientById(to);
+        if (direct) {
+            targetClientId = direct.id;
+        }
+
+        // 2) cameraId → clientId 매핑
+        if (!targetClientId) {
+            const camera = this.cameras.get(to);
+            if (camera && camera.clientId) {
+                targetClientId = camera.clientId;
+            }
+        }
+
+        // 3) viewerId → clientId 매핑
+        if (!targetClientId) {
+            for (const [cid, client] of this.clients.entries()) {
+                if (client.type === 'viewer' && client.data?.viewerId === to) {
+                    targetClientId = cid;
+                    break;
                 }
+            }
+        }
+
+        if (targetClientId) {
+            this.sendToClient(targetClientId, {
+                type: 'webrtc_signaling',
+                data: { from, to, type, data: signalData }
             });
-            console.log(`📡 WebRTC 시그널링: ${from} -> ${to} (${type})`);
+            console.log(`📡 WebRTC 시그널링 전달: ${from} -> ${to} (${type})`);
         } else {
-            console.warn(`⚠️ 대상 클라이언트를 찾을 수 없음: ${to}`);
+            console.warn(`⚠️ 시그널링 대상 매핑 실패 (to='${to}')`);
         }
     }
 
@@ -470,7 +516,7 @@ class MIMOStreamingServer {
                 id,
                 name: camera.name,
                 status: camera.status,
-                viewers: camera.viewers.length
+                viewers: camera.viewers instanceof Set ? camera.viewers.size : (Array.isArray(camera.viewers) ? camera.viewers.length : 0)
             }))
         };
     }

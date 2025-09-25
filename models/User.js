@@ -71,6 +71,12 @@ const User = sequelize.define('User', {
         defaultValue: DataTypes.NOW,
         field: 'updatedAt',  // ✅ camelCase로 매핑
     },
+    subscription_tier: {
+        type: DataTypes.ENUM('free', 'pro', 'premium'),
+        allowNull: false,
+        defaultValue: 'free',
+        comment: '구독 등급 (free/pro/premium)'
+    },
 
 }, {
     tableName: 'User',

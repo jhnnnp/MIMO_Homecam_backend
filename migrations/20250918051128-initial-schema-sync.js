@@ -2,7 +2,7 @@
 
 /** @type {import('sequelize-cli').Migration} */
 module.exports = {
-  async up (queryInterface, Sequelize) {
+  async up(queryInterface, Sequelize) {
     // Event 테이블에 새로운 필드 추가
     try {
       await queryInterface.addColumn('Event', 'started_at', {
@@ -69,7 +69,7 @@ module.exports = {
     }
   },
 
-  async down (queryInterface, Sequelize) {
+  async down(queryInterface, Sequelize) {
     // 추가된 컬럼들을 역순으로 제거
     await queryInterface.removeColumn('Camera', 'stream_url');
     await queryInterface.removeColumn('Recording', 'index_num');

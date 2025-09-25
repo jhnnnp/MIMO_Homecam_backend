@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "node --watch app.js",
     "start": "NODE_ENV=production node app.js",
+    "start:ngrok": "npm run start:all & ngrok http 4002 --log=stdout",
+    "dev:ngrok": "npm run dev:all & ngrok http 4002 --log=stdout",
     "websocket": "node websocket-server.js",
     "dev:websocket": "node --watch websocket-server.js",
     "start:all": "node start-all.js",

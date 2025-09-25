@@ -2,7 +2,7 @@
 
 /** @type {import('sequelize-cli').Migration} */
 module.exports = {
-  async up (queryInterface, Sequelize) {
+  async up(queryInterface, Sequelize) {
     // 1. Camera 테이블의 user_id를 owner_id로 변경
     await queryInterface.renameColumn('Camera', 'user_id', 'owner_id');
 
@@ -110,10 +110,10 @@ module.exports = {
     });
   },
 
-  async down (queryInterface, Sequelize) {
+  async down(queryInterface, Sequelize) {
     // DevicePermissions 테이블 제거
     await queryInterface.dropTable('DevicePermissions');
-    
+
     // Camera 테이블의 owner_id를 다시 user_id로 변경
     await queryInterface.renameColumn('Camera', 'owner_id', 'user_id');
   }

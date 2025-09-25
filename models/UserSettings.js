@@ -66,3 +66,12 @@ const UserSettings = sequelize.define('UserSettings', {
 });
 
 module.exports = UserSettings;
+
+
+
+
+
+
+
+
+

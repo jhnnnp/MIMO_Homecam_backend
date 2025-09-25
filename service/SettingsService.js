@@ -1,330 +1,306 @@
-const { Settings, User } = require('../models');
+const { UserSettings, UserCustomSettings, User } = require('../models');
+const { Op } = require('sequelize');
 
 /**
- * 설명: 사용자의 설정 조회
+ * 설명: 사용자의 모든 설정 조회 (고정 + 커스텀)
  * 입력: userId
- * 출력: 설정 정보
+ * 출력: 통합 설정 정보
  * 부작용: DB 조회
  * 예외: throw codes E_DATABASE_ERROR
  */
-async function getSettingsByUserId(userId) {
+async function getAllUserSettings(userId) {
     try {
-        let settings = await Settings.findOne({
-            where: { user_id: userId }
-        });
+        // 1. 핵심 설정 조회
+        const coreSettings = await getCoreSettings(userId);
 
-        // 설정이 없으면 기본 설정 생성
-        if (!settings) {
-            settings = await Settings.create({
-                user_id: userId,
-                notification_enabled: true,
-                email_notification: true,
-                motion_sensitivity: 'medium',
-                recording_quality: '720p',
-                storage_limit_gb: 10,
-                auto_delete_days: 30,
-                created_at: new Date(),
-                updated_at: new Date()
-            });
-        }
+        // 2. 커스텀 설정 조회
+        const customSettings = await getCustomSettings(userId);
 
-        return settings;
+        // 3. 통합하여 반환
+        return {
+            core: coreSettings,
+            custom: customSettings,
+            combined: {
+                ...coreSettings,
+                ...customSettings
+            }
+        };
     } catch (error) {
-        console.error('설정 조회 실패:', error);
+        console.error('전체 설정 조회 실패:', error);
         throw new Error('설정을 조회할 수 없습니다.');
     }
 }
 
 /**
- * 설명: 사용자 설정 업데이트
- * 입력: userId, updateData
- * 출력: 업데이트된 설정 정보
- * 부작용: DB 업데이트
+ * 설명: 사용자의 핵심 설정 조회 (UserSettings 테이블)
+ * 입력: userId
+ * 출력: 핵심 설정 정보
+ * 부작용: DB 조회
  * 예외: throw codes E_DATABASE_ERROR
  */
-async function updateSettings(userId, updateData) {
+async function getCoreSettings(userId) {
     try {
-        let settings = await Settings.findOne({
+        let coreSettings = await UserSettings.findOne({
             where: { user_id: userId }
         });
 
-        if (!settings) {
-            // 설정이 없으면 새로 생성
-            settings = await Settings.create({
+        // 설정이 없으면 기본 설정 생성
+        if (!coreSettings) {
+            coreSettings = await UserSettings.create({
                 user_id: userId,
+                notification_enabled: true,
+                motion_sensitivity: 'medium',
+                auto_recording: true,
+                recording_quality: '1080p',
+                storage_days: 30,
+                dark_mode: false,
+                language: 'ko',
+                timezone: 'Asia/Seoul'
+            });
+        }
+
+        // 객체 형태로 반환 (Sequelize 인스턴스가 아닌)
+        return coreSettings.toJSON ? coreSettings.toJSON() : coreSettings;
+    } catch (error) {
+        console.error('핵심 설정 조회 실패:', error);
+        throw new Error('핵심 설정을 조회할 수 없습니다.');
+    }
+}
+
+/**
+ * 설명: 사용자의 커스텀 설정 조회 (UserCustomSettings 테이블)
+ * 입력: userId
+ * 출력: 커스텀 설정 정보 (Key-Value 객체)
+ * 부작용: DB 조회
+ * 예외: throw codes E_DATABASE_ERROR
+ */
+async function getCustomSettings(userId) {
+    try {
+        const customSettingsArray = await UserCustomSettings.findAll({
+            where: { user_id: userId },
+            order: [['setting_key', 'ASC']]
+        });
+
+        // Key-Value 객체로 변환
+        const customSettings = {};
+        for (const setting of customSettingsArray) {
+            const { setting_key, setting_value, data_type } = setting;
+
+            // 데이터 타입에 따라 값 파싱
+            let parsedValue = setting_value;
+            try {
+                switch (data_type) {
+                    case 'number':
+                        parsedValue = Number(setting_value);
+                        break;
+                    case 'boolean':
+                        parsedValue = setting_value === 'true' || setting_value === true;
+                        break;
+                    case 'json':
+                        parsedValue = JSON.parse(setting_value);
+                        break;
+                    default:
+                        parsedValue = setting_value;
+                }
+            } catch (parseError) {
+                console.warn(`설정 값 파싱 실패 (${setting_key}):`, parseError);
+                parsedValue = setting_value; // 원본 값 유지
+            }
+
+            customSettings[setting_key] = parsedValue;
+        }
+
+        return customSettings;
+    } catch (error) {
+        console.error('커스텀 설정 조회 실패:', error);
+        throw new Error('커스텀 설정을 조회할 수 없습니다.');
+    }
+}
+
+/**
+ * 설명: 핵심 설정 업데이트
+ * 입력: userId, updateData
+ * 출력: 업데이트된 핵심 설정
+ * 부작용: DB 업데이트
+ * 예외: throw codes E_DATABASE_ERROR
+ */
+async function updateCoreSettings(userId, updateData) {
+    try {
+        // 사용자 존재 확인
+        const user = await User.findByPk(userId);
+        if (!user) {
+            throw new Error('사용자를 찾을 수 없습니다.');
+        }
+
+        // 기존 설정 조회 또는 생성
+        let coreSettings = await UserSettings.findOne({
+            where: { user_id: userId }
+        });
+
+        if (coreSettings) {
+            // 기존 설정 업데이트
+            await coreSettings.update({
                 ...updateData,
-                created_at: new Date(),
                 updated_at: new Date()
             });
         } else {
-            // 기존 설정 업데이트
-            await settings.update({
-                ...updateData,
-                updated_at: new Date()
+            // 새 설정 생성
+            coreSettings = await UserSettings.create({
+                user_id: userId,
+                ...updateData
             });
         }
 
-        return settings;
+        return coreSettings.toJSON ? coreSettings.toJSON() : coreSettings;
     } catch (error) {
-        console.error('설정 업데이트 실패:', error);
-        throw new Error('설정을 업데이트할 수 없습니다.');
-    }
-}
-
-/**
- * 설명: 특정 설정 값 조회
- * 입력: userId, settingKey
- * 출력: 설정 값
- * 부작용: DB 조회
- * 예외: throw codes E_DATABASE_ERROR
- */
-async function getSettingValue(userId, settingKey) {
-    try {
-        const settings = await getSettingsByUserId(userId);
-        return settings[settingKey];
-    } catch (error) {
-        console.error('설정 값 조회 실패:', error);
+        console.error('핵심 설정 업데이트 실패:', error);
         throw error;
     }
 }
 
 /**
- * 설명: 특정 설정 값 업데이트
- * 입력: userId, settingKey, value
- * 출력: 업데이트된 설정 정보
- * 부작용: DB 업데이트
+ * 설명: 커스텀 설정 업데이트 (단일 설정)
+ * 입력: userId, key, value, dataType
+ * 출력: 업데이트된 커스텀 설정
+ * 부작용: DB 업데이트/생성
  * 예외: throw codes E_DATABASE_ERROR
  */
-async function updateSettingValue(userId, settingKey, value) {
+async function updateCustomSetting(userId, key, value, dataType = 'string') {
     try {
-        const updateData = {};
-        updateData[settingKey] = value;
+        // 값을 문자열로 변환 (JSON은 stringify)
+        let stringValue = value;
+        if (dataType === 'json') {
+            stringValue = typeof value === 'string' ? value : JSON.stringify(value);
+        } else if (dataType === 'boolean') {
+            stringValue = String(value);
+        } else if (dataType === 'number') {
+            stringValue = String(value);
+        } else {
+            stringValue = String(value);
+        }
 
-        return await updateSettings(userId, updateData);
+        // 기존 설정 확인 및 업데이트 또는 생성
+        const [customSetting, created] = await UserCustomSettings.upsert({
+            user_id: userId,
+            setting_key: key,
+            setting_value: stringValue,
+            data_type: dataType,
+            updated_at: new Date()
+        }, {
+            returning: true
+        });
+
+        return customSetting.toJSON ? customSetting.toJSON() : customSetting;
     } catch (error) {
-        console.error('설정 값 업데이트 실패:', error);
+        console.error('커스텀 설정 업데이트 실패:', error);
         throw error;
     }
 }
 
 /**
- * 설명: 설정 초기화 (기본값으로 복원)
- * 입력: userId
- * 출력: 초기화된 설정 정보
- * 부작용: DB 업데이트
+ * 설명: 커스텀 설정 삭제
+ * 입력: userId, key
+ * 출력: 삭제 결과
+ * 부작용: DB 삭제
  * 예외: throw codes E_DATABASE_ERROR
  */
-async function resetSettings(userId) {
+async function deleteCustomSetting(userId, key) {
     try {
-        const defaultSettings = {
-            notification_enabled: true,
-            email_notification: true,
-            motion_sensitivity: 'medium',
-            recording_quality: '720p',
-            storage_limit_gb: 10,
-            auto_delete_days: 30
-        };
+        const deletedCount = await UserCustomSettings.destroy({
+            where: {
+                user_id: userId,
+                setting_key: key
+            }
+        });
 
-        return await updateSettings(userId, defaultSettings);
+        return deletedCount > 0;
+    } catch (error) {
+        console.error('커스텀 설정 삭제 실패:', error);
+        throw error;
+    }
+}
+
+/**
+ * 설명: 사용자 설정 초기화
+ * 입력: userId, resetType ('core', 'custom', 'all')
+ * 출력: 초기화 결과
+ * 부작용: DB 삭제/업데이트
+ * 예외: throw codes E_DATABASE_ERROR
+ */
+async function resetUserSettings(userId, resetType) {
+    try {
+        const result = { core: false, custom: false };
+
+        if (resetType === 'core' || resetType === 'all') {
+            // 핵심 설정을 기본값으로 재설정
+            await UserSettings.upsert({
+                user_id: userId,
+                notification_enabled: true,
+                motion_sensitivity: 'medium',
+                auto_recording: true,
+                recording_quality: '1080p',
+                storage_days: 30,
+                dark_mode: false,
+                language: 'ko',
+                timezone: 'Asia/Seoul',
+                updated_at: new Date()
+            });
+            result.core = true;
+        }
+
+        if (resetType === 'custom' || resetType === 'all') {
+            // 모든 커스텀 설정 삭제
+            const deletedCount = await UserCustomSettings.destroy({
+                where: { user_id: userId }
+            });
+            result.custom = deletedCount > 0;
+        }
+
+        return result;
     } catch (error) {
         console.error('설정 초기화 실패:', error);
-        throw new Error('설정을 초기화할 수 없습니다.');
-    }
-}
-
-/**
- * 설명: 카메라별 설정 조회
- * 입력: userId, cameraId
- * 출력: 카메라별 설정 정보
- * 부작용: DB 조회
- * 예외: throw codes E_DATABASE_ERROR
- */
-async function getCameraSettings(userId, cameraId) {
-    try {
-        // 사용자의 카메라인지 확인
-        const user = await User.findByPk(userId, {
-            include: [
-                {
-                    model: require('../models/Camera'),
-                    as: 'cameras',
-                    where: { id: cameraId },
-                    attributes: ['id', 'name']
-                }
-            ]
-        });
-
-        if (!user || user.cameras.length === 0) {
-            throw new Error('카메라에 접근 권한이 없습니다.');
-        }
-
-        // 카메라별 설정은 현재 전역 설정을 반환
-        // 향후 카메라별 개별 설정 테이블 추가 가능
-        const globalSettings = await getSettingsByUserId(userId);
-
-        return {
-            cameraId: cameraId,
-            cameraName: user.cameras[0].name,
-            settings: globalSettings
-        };
-    } catch (error) {
-        console.error('카메라 설정 조회 실패:', error);
         throw error;
     }
 }
 
 /**
- * 설명: 카메라별 설정 업데이트
- * 입력: userId, cameraId, updateData
- * 출력: 업데이트된 카메라별 설정 정보
- * 부작용: DB 업데이트
- * 예외: throw codes E_DATABASE_ERROR
- */
-async function updateCameraSettings(userId, cameraId, updateData) {
-    try {
-        // 사용자의 카메라인지 확인
-        const user = await User.findByPk(userId, {
-            include: [
-                {
-                    model: require('../models/Camera'),
-                    as: 'cameras',
-                    where: { id: cameraId },
-                    attributes: ['id', 'name']
-                }
-            ]
-        });
-
-        if (!user || user.cameras.length === 0) {
-            throw new Error('카메라에 접근 권한이 없습니다.');
-        }
-
-        // 현재는 전역 설정을 업데이트
-        // 향후 카메라별 개별 설정 테이블 추가 가능
-        const updatedSettings = await updateSettings(userId, updateData);
-
-        return {
-            cameraId: cameraId,
-            cameraName: user.cameras[0].name,
-            settings: updatedSettings
-        };
-    } catch (error) {
-        console.error('카메라 설정 업데이트 실패:', error);
-        throw error;
-    }
-}
-
-/**
- * 설명: 설정 유효성 검증
- * 입력: settingsData
+ * 설명: 설정 데이터 검증
+ * 입력: updateData
  * 출력: 검증 결과
  * 부작용: 없음
- * 예외: throw codes E_VALIDATION
+ * 예외: throw codes E_VALIDATION_ERROR
  */
-async function validateSettings(settingsData) {
-    const errors = [];
+async function validateCoreSettings(updateData) {
+    const allowedMotionSensitivity = ['low', 'medium', 'high'];
+    const allowedRecordingQuality = ['720p', '1080p', '4K'];
+    const allowedLanguages = ['ko', 'en', 'ja', 'zh'];
 
-    // 알림 설정 검증
-    if (settingsData.notification_enabled !== undefined &&
-        typeof settingsData.notification_enabled !== 'boolean') {
-        errors.push('notification_enabled는 boolean 값이어야 합니다.');
+    if (updateData.motion_sensitivity && !allowedMotionSensitivity.includes(updateData.motion_sensitivity)) {
+        throw new Error('유효하지 않은 모션 감지 민감도입니다.');
     }
 
-    if (settingsData.email_notification !== undefined &&
-        typeof settingsData.email_notification !== 'boolean') {
-        errors.push('email_notification는 boolean 값이어야 합니다.');
+    if (updateData.recording_quality && !allowedRecordingQuality.includes(updateData.recording_quality)) {
+        throw new Error('유효하지 않은 녹화 품질입니다.');
     }
 
-    // 모션 감도 검증
-    if (settingsData.motion_sensitivity &&
-        !['low', 'medium', 'high'].includes(settingsData.motion_sensitivity)) {
-        errors.push('motion_sensitivity는 low, medium, high 중 하나여야 합니다.');
+    if (updateData.language && !allowedLanguages.includes(updateData.language)) {
+        throw new Error('지원하지 않는 언어입니다.');
     }
 
-    // 녹화 품질 검증
-    if (settingsData.recording_quality &&
-        !['480p', '720p', '1080p'].includes(settingsData.recording_quality)) {
-        errors.push('recording_quality는 480p, 720p, 1080p 중 하나여야 합니다.');
-    }
-
-    // 저장소 제한 검증
-    if (settingsData.storage_limit_gb !== undefined) {
-        const limit = parseInt(settingsData.storage_limit_gb);
-        if (isNaN(limit) || limit < 1 || limit > 1000) {
-            errors.push('storage_limit_gb는 1-1000 사이의 숫자여야 합니다.');
-        }
-    }
-
-    // 자동 삭제 일수 검증
-    if (settingsData.auto_delete_days !== undefined) {
-        const days = parseInt(settingsData.auto_delete_days);
-        if (isNaN(days) || days < 1 || days > 365) {
-            errors.push('auto_delete_days는 1-365 사이의 숫자여야 합니다.');
-        }
-    }
-
-    if (errors.length > 0) {
-        throw new Error(`설정 검증 실패: ${errors.join(', ')}`);
+    if (updateData.storage_days && (updateData.storage_days < 1 || updateData.storage_days > 365)) {
+        throw new Error('저장 기간은 1일부터 365일까지 설정할 수 있습니다.');
     }
 
     return true;
 }
 
-/**
- * 설명: 설정 내보내기 (백업용)
- * 입력: userId
- * 출력: 설정 JSON
- * 부작용: DB 조회
- * 예외: throw codes E_DATABASE_ERROR
- */
-async function exportSettings(userId) {
-    try {
-        const settings = await getSettingsByUserId(userId);
-
-        return {
-            userId: userId,
-            exportedAt: new Date().toISOString(),
-            settings: settings.toJSON()
-        };
-    } catch (error) {
-        console.error('설정 내보내기 실패:', error);
-        throw new Error('설정을 내보낼 수 없습니다.');
-    }
-}
-
-/**
- * 설명: 설정 가져오기 (복원용)
- * 입력: userId, settingsData
- * 출력: 가져온 설정 정보
- * 부작용: DB 업데이트
- * 예외: throw codes E_VALIDATION, E_DATABASE_ERROR
- */
-async function importSettings(userId, settingsData) {
-    try {
-        // 설정 데이터 검증
-        await validateSettings(settingsData);
-
-        // 설정 업데이트
-        const updatedSettings = await updateSettings(userId, settingsData);
-
-        return {
-            userId: userId,
-            importedAt: new Date().toISOString(),
-            settings: updatedSettings
-        };
-    } catch (error) {
-        console.error('설정 가져오기 실패:', error);
-        throw error;
-    }
-}
-
 module.exports = {
-    getSettingsByUserId,
-    updateSettings,
-    getSettingValue,
-    updateSettingValue,
-    resetSettings,
-    getCameraSettings,
-    updateCameraSettings,
-    validateSettings,
-    exportSettings,
-    importSettings
+    getAllUserSettings,
+    getCoreSettings,
+    getCustomSettings,
+    updateCoreSettings,
+    updateCustomSetting,
+    deleteCustomSetting,
+    resetUserSettings,
+    validateCoreSettings
 };

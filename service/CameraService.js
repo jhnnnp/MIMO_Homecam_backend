@@ -66,7 +66,7 @@ async function getCameraById(cameraId, userId) {
             include: [
                 {
                     model: User,
-                    as: 'user',
+                    as: 'owner',
                     attributes: ['id', 'email', 'name']
                 }
             ]
@@ -361,7 +361,7 @@ async function getAccessibleCamerasByUserId(userId) {
 
         // 2. 공유받은 카메라 조회
         const sharedCameras = await DevicePermissions.findAll({
-            where: { 
+            where: {
                 user_id: userId,
                 is_active: true,
                 [Op.or]: [
@@ -396,7 +396,7 @@ async function getAccessibleCamerasByUserId(userId) {
 
         // 3. 결과 합치기
         const allCameras = [...ownedCamerasWithPermission, ...sharedCamerasWithPermission];
-        
+
         return allCameras.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
     } catch (error) {
         console.error('접근 가능한 카메라 목록 조회 실패:', error);
@@ -489,7 +489,7 @@ async function getUserCameraPermission(cameraId, userId) {
 
         // 2. 공유받은 권한 확인
         const sharedPermission = await DevicePermissions.findOne({
-            where: { 
+            where: {
                 camera_id: cameraId,
                 user_id: userId,
                 is_active: true,

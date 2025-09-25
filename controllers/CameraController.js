@@ -8,6 +8,7 @@ const asyncHandler = require('../utils/asyncHandler');
 const { createRequestLog, createResponseLog, log } = require('../utils/logger');
 const connectionManager = require('../utils/connectionManager');
 const { buildLiveStreamUrl, buildCameraStreamUrl, getDefaultMediaSettings } = require('../utils/mediaUrlBuilder');
+const pinCodeService = require('../service/pinCodeService');
 
 /**
  * [GET] /cameras
@@ -508,6 +509,58 @@ exports.getCameraStats = asyncHandler(async (req, res) => {
 });
 
 /**
+ * [POST] /cameras/generate-pin
+ * 홈캠 PIN 코드 생성 (뷰어 연결용 6자리 PIN)
+ */
+exports.generatePinCode = asyncHandler(async (req, res) => {
+    const requestLog = createRequestLog(req, 'GENERATE_PIN_CODE');
+    log('info', requestLog);
+
+    const { cameraId, cameraName, pinCode: customPin } = req.body || {};
+    const userId = req.user.userId;
+
+    if (!cameraId) {
+        const responseLog = createResponseLog(res, 400, 'cameraId는 필수입니다.');
+        log('warn', responseLog);
+        return errors.validation(res, 'cameraId는 필수입니다.');
+    }
+
+    // CameraService에 저장은 필수가 아님. 존재하면 upsert 시도 (베스트 effort)
+    try {
+        await cameraService.createOrUpdateCameraByDeviceId(String(cameraId), cameraName || String(cameraId), userId, 'online');
+    } catch (e) {
+        log('warn', { message: 'PIN 발급 중 카메라 upsert 실패(무시)', error: e.message });
+    }
+
+    const cameraInfo = {
+        cameraId: String(cameraId),
+        name: cameraName || String(cameraId),
+        userId
+    };
+
+    const pinData = await pinCodeService.generatePinCode(cameraInfo, customPin || null);
+
+    // 퍼블리셔용 미디어 서버 URL 제공 (카메라 앱에서 사용할 수 있도록)
+    const publisherUrl = buildCameraStreamUrl(String(cameraId));
+
+    const responseLog = createResponseLog(res, 201, 'PIN 코드 생성 성공');
+    log('info', responseLog);
+
+    ok(res, {
+        cameraId: String(cameraId),
+        cameraName: cameraName || String(cameraId),
+        connectionId: pinData.connectionId,
+        pinCode: pinData.pinCode,
+        expiresAt: pinData.expiresAt,
+        ttl: pinData.ttl,
+        media: {
+            publisherUrl
+        },
+        message: 'PIN 코드가 생성되었습니다.'
+    }, null);
+}, null);
+
+/**
  * [DELETE] /cameras/:id
  * 카메라 삭제
  */
@@ -539,7 +592,7 @@ exports.deleteCamera = asyncHandler(async (req, res) => {
     const responseLog = createResponseLog(res, 200, '카메라 삭제 성공');
     log('info', responseLog);
 
-    ok(res, { 
+    ok(res, {
         deletedCamera,
         message: `'${existingCamera.name}' 카메라가 성공적으로 삭제되었습니다.`
     });

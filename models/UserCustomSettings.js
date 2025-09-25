@@ -38,3 +38,12 @@ const UserCustomSettings = sequelize.define('UserCustomSettings', {
 });
 
 module.exports = UserCustomSettings;
+
+
+
+
+
+
+
+
+
